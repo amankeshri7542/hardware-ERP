@@ -1,5 +1,7 @@
 # Phase 2 frontend evidence
 
+> Final verification: code commit `726af321` passed remote engineering CI run 37910576845, including browser journeys. Earlier pending notes record intermediate states; see the final remote verification in PHASE-2-TEST-EVIDENCE.md. Production release remains blocked.
+
 Scope: ordinary billing, Quick Bill, standalone receipts, exact draft previews and durable recovery. Work is isolated in `codex/phase-1-security-baseline`; no staging, commit, push or deployment was performed by this frontend specialist. Phase 1 cashier restrictions, cookie sessions and disabled PDFs/attachments remain in place.
 
 ## Behavior

@@ -23,7 +23,7 @@ Their earlier broad Phase 2 labels do not justify removing or weakening tests.
 
 ## Phase 2 changed paths
 
-61 paths differ from the preserved Phase 1 tree. The frozen source/test tree is `3c23c1cf6dd268c728467c136ac21b64f8462f22`; final evidence updates after this freeze affect documentation only. Migration 014 provides posting/idempotency support; 015 preserves new invoice base-unit snapshots. Historical migrations 001–011 and 013 are unchanged.
+61 paths differ from the preserved Phase 1 tree. The frozen source/test tree is `e84f7b81374e5c852ab18dc82835c548ea95b231`; final evidence updates after this freeze affect documentation only. Migration 014 provides posting/idempotency support; 015 preserves new invoice base-unit snapshots. Historical migrations 001–011 and 013 are unchanged.
 
 ```text
 M	.context/API.md

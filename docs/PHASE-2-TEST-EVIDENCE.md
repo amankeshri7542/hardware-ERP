@@ -1,5 +1,7 @@
 # Phase 2 local financial evidence
 
+> Final result: local and remote engineering gates pass for source `e84f7b81`; the full release remains blocked. The final remote section below supersedes earlier pending CI notes.
+
 This records synthetic local evidence on 2026-10-09. It is not production certification. All new HTTP financial tests authenticate through the real application and use a restricted PostgreSQL role; a separate owner connection creates fixtures and inspects results. No live environment files, disclosed credentials, production database, deployed endpoint or worker were used.
 
 ## Frozen baseline before repair
@@ -26,7 +28,7 @@ The last concurrency test holds the customer row and observes all three applicat
 
 The unchanged invariant assertions in `backend/tests/release-blockers/financial.test.js` now report **8 pass / 3 fail, zero skipped**. Only valid fixture setup changed: required due date and request key, deterministic unique customer phone, consistent opening stock, and restricted-role application access. FIN-06/07/08 still return HTTP 201 instead of 422 after successful invoice setup. They remain Phase 3 blockers; unrelated validation errors have not hidden the defects.
 
-The complete guarded backend `npm test`, after the catalog concurrency, base-unit and operation-actor regressions, passed environment **5**, security **12**, containment **13** and financial **54** tests (**84 total**, zero skipped). Backend lint passed. The final immutable-candidate proof is recorded below for tree `3c23c1cf6dd268c728467c136ac21b64f8462f22`.
+The complete guarded backend `npm test`, after the catalog concurrency, base-unit and operation-actor regressions, passed environment **5**, security **12**, containment **13** and financial **54** tests (**84 total**, zero skipped). Backend lint passed. The latest immutable-candidate proof is recorded below for tree `e84f7b81374e5c852ab18dc82835c548ea95b231`.
 
 `backend/tests/phase2/base-unit.test.js`: **2/2 pass** after **2/2 intended red failures** before implementation. The authoritative quote includes the current base-unit label, and an issued invoice retains `base_unit_snapshot='piece'` after its product changes to `kg`. Migration 015 was applied to both disposable backend and frontend databases before these checks.
 
@@ -40,7 +42,7 @@ A second separate clone, `hardware_phase2_upgrade_015_test`, applied both 014 an
 
 The repository migration test now explicitly applies 013, 014 and 015 to populated historical rows. Its comparison permits exactly the added nullable invoice `notes` and invoice-item `base_unit_snapshot` columns while requiring every existing value to remain equal. It retains repeat/checksum rejection, interrupted migration rollback, advisory locking, untracked-schema refusal, append-only ledger and negative-stock checks.
 
-## Final clean candidate verification
+## Earlier clean candidate verification (3c23c1cf)
 
 **Tested tree: `3c23c1cf6dd268c728467c136ac21b64f8462f22`.** It was exported with `git archive` into `/private/tmp/hardware-phase2-final-3c23c1cf`. Before installation, the archive contained **267 source files, zero `node_modules` directories and no `frontend/dist`**. Independent pinned `npm ci` runs installed 417 backend packages and 241 frontend packages. Node was 24.21.0 and npm 11.17.0. Both installs reported the same two moderate advisories already documented; no dependency versions or lockfiles were changed to suppress them.
 
@@ -102,6 +104,38 @@ rtk proxy env GITLEAKS_BIN=/private/tmp/hardware-erp-gitleaks/gitleaks python3 s
 
 Tracked files: **0 findings**. History: **2 known disclosures**, at `.context/KNOWN_ISSUES.md` in commit `8b4234c…` and `backend/.env` in commit `82bc3e7…`; neither finding was suppressed or presented as rotation evidence. The history scan remains a release blocker. The coordinator also verified that the original checkout HEAD and its pre-existing AI/mobile/UI change list were unchanged. No production credentials were used and no live rotation was claimed.
 
+## Final verification after the CI accessibility repair
+
+**Latest tested tree: `e84f7b81374e5c852ab18dc82835c548ea95b231`.** The clean archive is `/private/tmp/hardware-phase2-final-e84f7b81`; all logs, command exit codes, metadata, `source-manifest.json` and `summary.json` are in `/private/tmp/hardware-phase2-final-e84f7b81-evidence`. Its initial state again had 267 source files, no dependency directories and no build output. Pinned Node 24.21.0/npm 11.17.0 installed 417 backend and 241 frontend packages from the unchanged lockfiles.
+
+The coordinator inspected remote CI run **37908823765**: backend and unit gates passed, but the payment-recovery browser case could not locate the exact accessible name `Done` while Ant Design's loading spinner contributed to the button name. The financial recovery and database assertions had already passed. The frontend specialist reproduced the accessibility defect before repair, then added explicit `aria-label` and `aria-busy` props and strengthened the existing browser case. No financial algorithm, request identity or backend behavior changed.
+
+A source-manifest comparison against `3c23c1cf` found exactly two non-documentation changes: `frontend/src/components/PaymentModal/PaymentModal.jsx` and `frontend/tests/financial-browser.test.js`. The new browser assertion holds a real committed replay response, verifies the pending button's stable accessible name, disabled state and `aria-busy=true`, then checks `Done` is no longer busy and the refreshed invoice summary/history shows exactly one receipt. The same case still proves the original key, actor, payload and one committed payment.
+
+The complete clean runner was repeated with the same explicit loopback proxy trust, network preloads, separate browser fixture owner, restricted browser runtime, disposable PostgreSQL and production build mode described above:
+
+| Final exact-tree gate | Result |
+|---|---|
+| Both fresh `npm ci` installs | Pass, 417 backend / 241 frontend packages |
+| Backend lint and syntax; frontend lint | Pass |
+| Explicit production frontend build | Pass, Vite 7.3.7 / 3,129 modules |
+| Backend `npm test` | **84 pass, 0 fail, 0 skipped** |
+| Frontend auth + financial unit suites | **12 pass, 0 fail, 0 skipped** |
+| Strengthened financial browser suite | **9 pass, 0 fail, 0 skipped** |
+| Baseline browser suite | **4 pass, 0 fail, 0 skipped** |
+| Real PostgreSQL TLS; real nginx production SPA | **1 pass each** |
+| Original release-blocker suite | **8 pass / 3 original Phase 3 failures / 0 skipped**, exit 1 |
+
+Production bundle: `frontend/dist/assets/index-ii5Cd8FD.js`, **1,508.41 kB / 467.89 kB gzip**, SHA-256 `d7430b3e6d1f2abe949b2c1af966052305f79d6a4dc91e45f6f06e0b6f93f999`. The large-chunk warning and two moderate npm advisories per package remain visible. Every one of the 267 source-file hashes remained unchanged after all commands. Ports 5173 and 55433 were closed afterward; no owned nginx test process remained. The browser harness closed its Chromium instance, server and database pools. The main disposable PostgreSQL was left for coordinator-owned shutdown.
+
+This is local verification of the new exact source tree. The next remote CI run follows the next push and was not yet claimed to pass in this evidence. Docker remains unavailable locally. Full release remains blocked by the three original return invariants and the documented operational/security gates.
+
 ## Limits and remaining gates
 
 Docker is unavailable locally, so final container build/execution remains unverified here. Native Redis and the document worker were not started. Phase 3 return defects, live credential rotation, live TLS/networking, historical reconciliation, operator approvals and production deployment remain outside this local evidence. Refer to the final Phase 2 report for the eventual frozen candidate revision and complete payment, frontend, build and security gate totals.
+
+## Final remote verification (supersedes earlier pending CI notes)
+
+Source tree `e84f7b81374e5c852ab18dc82835c548ea95b231` is code commit `726af321e7828390a10cb30413260084ef0fe934`. Remote run [37910576845](https://github.com/amankeshri7542/hardware-ERP/actions/runs/37910576845) completed: engineering job **PASS**, including all browser journeys and both API/web Docker image builds. The production-release job **FAIL** is confined to the original FIN-06/07/08 return assertions (8 pass, 3 fail, 0 skip) and the two existing historical-credential findings. No deployment or application-image/Compose runtime verification occurred.
+
+Read-only commands used the already configured repository-owner GitHub account for each process without changing the default account: `gh run view 37910576845 --repo amankeshri7542/hardware-ERP --json status,conclusion,jobs`; failed-release evidence was read with `gh run view 37910576845 --repo amankeshri7542/hardware-ERP --job 113755390829 --log-failed`. Only diagnostic lines were printed; credential values were not. The redacted release diagnostics are preserved in `/private/tmp/hardware-phase2-ci-37910576845-release.log`. See PHASE-2-REPORT.md for remaining runtime/operator gates.

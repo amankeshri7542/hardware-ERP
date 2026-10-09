@@ -8,7 +8,7 @@ Phase 2 implementation and final verification of the frozen source are complete.
 - Branch: `codex/phase-1-security-baseline`.
 - Starting committed HEAD: `5404f98b27eb8c326aa3ebc603ee43efe6394404`.
 - Preserved Phase 1 staged tree: `0e0a2c19acac02660fd4981765f5426059f14197` (129 staged paths, no unstaged changes).
-- Frozen Phase 2 source/test tree: `3c23c1cf6dd268c728467c136ac21b64f8462f22`.
+- Frozen Phase 2 source/test tree: `e84f7b81374e5c852ab18dc82835c548ea95b231`.
 
 Both trees are retained locally under `refs/codex/phase-1-starting-candidate` and `refs/codex/phase-2-tested-source` so Git garbage collection cannot discard these recovery snapshots. Only the requested branch is pushed.
 
@@ -52,7 +52,7 @@ The full release suite remains **8 passed, 3 failed, 0 skipped**. The three retu
 
 Regression tests were added before repairs. Recorded red cases included box pricing of 2000 instead of 200, fractional discount rounding of 0.16 instead of 0.15, forged snapshots, malformed/excess tenders, numeric-string payments, historical reconciliation drift, failed price-history writes, missing unit snapshots and duplicate retry effects. The last review reproduced an account-switch retry creating two invoices under different users; the fixed browser journey rejects the switched-account retry and recovers the original invoice after signing back in.
 
-Final clean-install verification of tree `3c23c1cf6dd268c728467c136ac21b64f8462f22` passed: backend **84** (5 environment, 12 security, 13 containment, 54 financial), frontend unit/auth **12**, browser **13** (9 financial, 4 Phase 1), native database TLS **1** and nginx fallback **1**, all with **0 skips**. Fresh `npm ci` installed 417 backend and 241 frontend packages; lint, syntax and the production build passed. Application source, tests, migrations and lockfiles were unchanged during verification; subsequent finalization changes only documentation.
+Final clean-install verification of tree `e84f7b81374e5c852ab18dc82835c548ea95b231` passed: backend **84** (5 environment, 12 security, 13 containment, 54 financial), frontend unit/auth **12**, browser **13** (9 financial, 4 Phase 1), native database TLS **1** and nginx fallback **1**, all with **0 skips**. Fresh `npm ci` installed 417 backend and 241 frontend packages; lint, syntax and the production build passed. Application source, tests, migrations and lockfiles were unchanged during verification; subsequent finalization changes only documentation.
 
 Exact commands, logs, counts and source identities are in [test evidence](PHASE-2-TEST-EVIDENCE.md) and [frontend evidence](PHASE-2-FRONTEND-EVIDENCE.md). The [independent review](PHASE-2-INDEPENDENT-REVIEW.md) records financial, concurrency, retry, permission and frontend/backend findings and dispositions. All in-scope blocking findings were fixed before the source freeze. Final CI review also corrected production build mode, restricted-role browser execution and the synthetic loopback proxy setting; independent review confirmed that guards, permissions and the no-deployment boundary remain intact.
 
@@ -61,7 +61,7 @@ Exact commands, logs, counts and source identities are in [test evidence](PHASE-
 | Gate | Status and limits |
 |---|---|
 | A. Phase 2 billing/payment gates | **PASS** for the supported contract: real PostgreSQL/API transactions, restricted-role execution, concurrency, retries and browser recovery. This does not certify returns or production release. |
-| B. Inherited Phase 1 runtime/operator gates | Native TLS, nginx, session, permissions and containment regressions pass. Docker remains unavailable locally; image/Compose/Redis checks blocked. Live credential rotations, real TLS/networking/grants, backup restore and release governance remain pending. Remote CI unverified until a run is observed. |
+| B. Inherited Phase 1 runtime/operator gates | Native TLS, nginx, session, permissions and containment regressions pass. Remote engineering CI and both API/web image builds pass on code commit `726af321e7828390a10cb30413260084ef0fe934`. Docker remains unavailable locally; Compose, application-image runtime and Redis integration remain unverified. Live credential rotations, real TLS/networking/grants, backup restore and release governance remain pending. |
 | C. Remaining financial/return/document blockers | FIN-06/07/08 remain Phase 3 failures. Documents and cashier billing remain intentionally disabled. Historical secret rotation remains an operator action. |
 | D. Full production release | **BLOCKED** |
 
@@ -77,6 +77,16 @@ Continue only with the [Phase 3 handoff](PHASE-3-HANDOFF.md) when separately req
 
 ## Local artifacts and shutdown
 
-The tested archive is `/private/tmp/hardware-phase2-final-3c23c1cf`; logs, source manifests and the machine-readable summary are in `/private/tmp/hardware-phase2-final-3c23c1cf-evidence`. The final source manifest matched all 267 archived source files. The production bundle SHA-256 is `3eed2980fee476fc2938fadc8a56768335b6c12bd28298e5362f7febd1d7b650`.
+The tested archive is `/private/tmp/hardware-phase2-final-e84f7b81`; logs, source manifests and the machine-readable summary are in `/private/tmp/hardware-phase2-final-e84f7b81-evidence`. The final source manifest matched all 267 archived source files. The production bundle SHA-256 is `d7430b3e6d1f2abe949b2c1af966052305f79d6a4dc91e45f6f06e0b6f93f999`.
 
 Browser, nginx and temporary TLS database processes were closed after tests. The coordinator then stopped only the owned disposable PostgreSQL cluster at `/private/tmp/hardware-phase1-pg-5r5p2izn/data` with `pg_ctl -m fast -w stop`; its synthetic databases and evidence remain available. Other local services were not stopped.
+
+## Remote CI and delivery evidence
+
+Code commit `726af321e7828390a10cb30413260084ef0fe934` is pushed to `origin/codex/phase-1-security-baseline`. [Remote CI run 37910576845](https://github.com/amankeshri7542/hardware-ERP/actions/runs/37910576845) completed with **engineering PASS**: real database migrations, restricted-role financial/auth tests, frontend units/build/browser journeys, TLS/nginx smoke checks, dependency gate, current tracked-secret scan, and both API/web Docker image builds. No images were pushed or deployed. Image builds do not establish Compose or application-image runtime readiness.
+
+The separate production-release job **failed as expected** on the original desired-behavior assertions FIN-06, FIN-07 and FIN-08: **11 tests, 8 passed, 3 failed, 0 skipped**. Its historical-credential gate also failed on the same two redacted findings. The overall workflow is therefore red; this does not waive either release gate. The remote release log is saved locally at `/private/tmp/hardware-phase2-ci-37910576845-release.log`.
+
+The first pushed code candidate (`ca8696b54db87bbc583c9f778374c0ef96b2f028`, CI run 37908823765) exposed a payment-button accessibility failure after all payment recovery/database assertions passed. Local browser snapshots showed `loading Done`; a held real replay response reproduced spinner contamination of `Retry original payment`. The original CI timeout did not reproduce naturally locally, so no broader timing cause is claimed. Explicit accessible label/busy attributes fix the demonstrated defect. The existing exact Done assertion remains, with added refreshed invoice balance/history checks before teardown. Five repeated payment journeys, both full browser suites, independent review, the final clean archive and remote CI passed afterward.
+
+The final follow-up after this verified code revision contains documentation only. The final response identifies the delivered branch HEAD; the frozen source tree above and CI code commit identify exactly what was tested. The original checkout's separate work remains untouched.

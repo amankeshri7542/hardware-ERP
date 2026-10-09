@@ -1,5 +1,7 @@
 # Release blockers
 
+Remote CI [37910576845](https://github.com/amankeshri7542/hardware-ERP/actions/runs/37910576845) verifies engineering and API/web image builds for code commit `726af321`. Its separate release job fails exactly FIN-06/07/08 (8 pass, 3 fail, 0 skip) and the two historical-credential findings. Compose/application-image runtime and live operator gates remain unresolved.
+
 Full production release is **BLOCKED**. The local candidate is not financial
 correctness certification. No deployment or live repairs were authorized.
 

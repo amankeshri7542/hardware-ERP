@@ -1,5 +1,7 @@
 # Phase 2 independent review
 
+> Final verification: code commit `726af321` passed remote engineering CI run 37910576845, including browser journeys. Earlier pending notes record intermediate states; see the final remote verification in PHASE-2-TEST-EVIDENCE.md. Production release remains blocked.
+
 ## Environment and invoice specialist review
 
 The reviewer implemented the independent database/HTTP regressions and did not implement the financial application source or migration 014. Read-only review covered invoice normalization/calculation, quote/create transaction boundaries, migration 014, catalog price history and the explicit grant script. The integration assertions exercised the real authenticated application as the restricted runtime role.
@@ -54,7 +56,7 @@ Actor-binding source SHA-256 values:
 - `backend/src/modules/invoices/invoices.router.js`: `d77781b1ac2c3ccc5f7467a3eab62b4c1d87cfa61a4fa8cd43e0343d8a669e50`
 - `backend/src/modules/payments/payments.router.js`: `c8c2aaf340308ea0451cab8d6c2f884ecc9c800f31ea8ad58a20790cf52e6cdf`
 
-## Final review disposition
+## Review disposition at the first clean verification
 
 All described repair verification is now complete for tested tree `3c23c1cf6dd268c728467c136ac21b64f8462f22`. The final clean archive passed backend 84, frontend unit 12, real browser 13, PostgreSQL TLS 1 and nginx 1 tests with zero skips. The original release suite still has the same three deliberate Phase 3 return failures. There is no remaining Phase 2 blocker identified by these independent reviews; this does not authorize production release.
 
@@ -63,3 +65,16 @@ The security specialist independently reviewed the final CI configuration. Produ
 The CI findings were substantiated during verification: an omitted loopback proxy setting caused five browser login failures after four passing journeys in an earlier archive, and a global test environment produced the wrong frontend build mode. The final runner/configuration supplies those settings explicitly, keeps rate limiting enabled and passed all nine financial browser journeys plus the four baseline journeys from the final exact tree. The source/test/migration/lockfile delta between the repaired application freeze and final tree was empty; only CI configuration and documents changed. All 267 files inside the final archive retained their original hashes after verification. Evidence logs are in `/private/tmp/hardware-phase2-final-3c23c1cf-evidence`.
 
 Remaining limitations are unchanged: Docker execution is unavailable locally; historical credential disclosures, return invariants, production reconciliation and operator-controlled deployment gates remain open. The final commit may add documentation-only evidence updates after this tested source tree.
+
+## Final accessibility follow-up and clean verification
+
+The coordinator's remote CI review of run 37908823765 identified a payment modal accessibility defect after the financial recovery and database assertions had passed: the loading icon could contribute to the button's accessible name, preventing an exact `Done` match. The frontend specialist captured the failure before repair. The application delta is limited to an explicit label and busy state on the modal's existing confirmation button; the existing real-browser case was strengthened to hold the committed replay response, verify loading-state accessibility, then confirm the refreshed invoice summary and single receipt. The independent security reviewer reported no findings in this delta. The environment reviewer also read the two-file diff and found no new financial or security behavior.
+
+The final archive for tree `e84f7b81374e5c852ab18dc82835c548ea95b231` passed fresh dependency installation, lint, syntax, production build, backend 84, frontend unit 12, browser 13, PostgreSQL TLS 1 and nginx 1 checks. There were zero skipped tests. The original release suite remained 8 pass and the same three Phase 3 return failures. Source-hash comparison against the earlier tested tree confirmed all backend, financial contract, idempotency, migration, CI and dependency bytes were unchanged; only the PaymentModal props, the strengthened browser test and documentation differed. All 267 archived source files remained unchanged during verification.
+
+The new production artifact is `index-ii5Cd8FD.js`, SHA-256 `d7430b3e6d1f2abe949b2c1af966052305f79d6a4dc91e45f6f06e0b6f93f999`. Logs and manifests are in `/private/tmp/hardware-phase2-final-e84f7b81-evidence`. No unresolved issue was found within the reviewed Phase 2 delta. The next remote CI run remains a separate gate; no remote success or local Docker execution is claimed. Existing production-release blockers remain open.
+
+Reviewed accessibility delta SHA-256 values:
+
+- `frontend/src/components/PaymentModal/PaymentModal.jsx`: `5c28d26e72d0bd3dbb2739d99a8387ecb61ba6c18df5a7c4e658b5685d0fe00f`
+- `frontend/tests/financial-browser.test.js`: `3c89d9f548a090899e7202f90a66843e05738d0aceba42f70b7ac2c00b1b35c3`
