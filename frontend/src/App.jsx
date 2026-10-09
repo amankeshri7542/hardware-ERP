@@ -42,6 +42,11 @@ import CustomerDetailPage from './pages/Customers/CustomerDetailPage';
 
 // Payment pages
 import PaymentsPage from './pages/Payments/PaymentsPage';
+import SettlementsPage from './pages/Settlements/SettlementsPage.jsx';
+import PartySettlementPage from './pages/Settlements/PartySettlementPage.jsx';
+import AnonymousLiabilitiesPage from './pages/Settlements/AnonymousLiabilitiesPage.jsx';
+import DailyClosePage from './pages/Settlements/DailyClosePage.jsx';
+import SettlementReportsPage from './pages/Settlements/SettlementReportsPage.jsx';
 
 // Report pages
 import ReportsIndexPage from './pages/Reports/ReportsIndexPage';
@@ -118,6 +123,12 @@ export default function App() {
 
             {/* Payments */}
             <Route path="/payments" element={<PaymentsPage />} />
+            <Route path="/settlements" element={<SettlementsPage />} />
+            <Route path="/settlements/customer/:id" element={<PartySettlementPage key="customer" domain="customer" />} />
+            <Route path="/settlements/supplier/:id" element={<PartySettlementPage key="supplier" domain="supplier" />} />
+            <Route path="/settlements/anonymous" element={<AnonymousLiabilitiesPage />} />
+            <Route path="/settlements/day" element={<DailyClosePage />} />
+            <Route path="/settlements/reports" element={<SettlementReportsPage />} />
 
             {/* Reports */}
             <Route path="/reports" element={<ReportsIndexPage />} />

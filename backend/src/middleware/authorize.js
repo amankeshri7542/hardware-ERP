@@ -2,17 +2,23 @@ const CAPABILITIES = Object.freeze({
   admin: Object.freeze(['catalog.read', 'catalog.write', 'stock.read', 'stock.adjust', 'cost.read',
     'billing.create', 'invoices.read', 'returns.create', 'customers.read', 'customers.write',
     'suppliers.read', 'suppliers.write', 'purchases.read', 'purchases.write', 'payments.read',
-    'payments.write', 'dashboard.read', 'reports.read', 'exports.read', 'settings.read']),
+    'payments.write', 'dashboard.read', 'reports.read', 'exports.read', 'settings.read', 'finance.read', 'finance.write']),
   cashier: Object.freeze(['catalog.read']),
 });
 
 // New endpoints have no privilege until explicitly classified here.
 const ROUTES = [
+  ['GET', /^\/finance\/(?:customers|suppliers)\/\d+(?:\/statement)?\/?$/, 'finance.read'],
+  ['GET', /^\/finance\/statements\/(?:customer|supplier)\/\d+\/?$/, 'finance.read'],
+  ['GET', /^\/finance\/(?:anonymous|days|reports|summary|export\.csv)\/?$/, 'finance.read'],
+  ['POST', /^\/finance\/(?:customer|supplier)\/(?:quote|commands)\/?$/, 'finance.write'],
+  ['POST', /^\/finance\/days\/(?:quote|open|close)\/?$/, 'finance.write'],
   ['GET', /^\/products(?:\/(?:search|low-stock|barcode\/[^/]+|\d+(?:\/unit-conversions)?))?\/?$/, 'catalog.read'],
   ['GET', /^\/products\/\d+\/stock-ledger\/?$/, 'stock.read'],
   ['GET', /^\/products\/\d+\/(?:price-history|suppliers)\/?$/, 'cost.read'],
   ['POST', /^\/products(?:\/\d+\/(?:suppliers|unit-conversions))?\/?$/, 'catalog.write'],
   ['PUT', /^\/products\/\d+\/?$/, 'catalog.write'],
+  ['POST', /^\/products\/\d+\/stock-adjustments\/?$/, 'stock.adjust'],
   ['DELETE', /^\/products\/(?:\d+|unit-conversions\/\d+)\/?$/, 'catalog.write'],
   ['GET', /^\/customers(?:\/(?:search|\d+(?:\/(?:ledger|summary))?))?\/?$/, 'customers.read'],
   ['POST', /^\/customers\/?$/, 'customers.write'],
@@ -24,15 +30,18 @@ const ROUTES = [
   ['GET', /^\/purchases(?:\/\d+(?:\/returns)?)?\/?$/, 'purchases.read'],
   ['GET', /^\/purchases\/[^/]+\/invoice\/?$/, 'purchases.read'],
   ['POST', /^\/purchases\/?$/, 'purchases.write'],
+  ['POST', /^\/purchases\/quote\/?$/, 'purchases.write'],
   ['POST', /^\/purchases\/[^/]+\/invoice\/?$/, 'purchases.write'],
   ['PUT', /^\/purchases\/\d+\/notes\/?$/, 'purchases.write'],
   ['POST', /^\/purchases\/\d+\/returns\/?$/, 'returns.create'],
+  ['POST', /^\/purchases\/\d+\/returns\/quote\/?$/, 'returns.create'],
   ['GET', /^\/payments(?:\/invoice\/\d+)?\/?$/, 'payments.read'],
   ['POST', /^\/payments\/?$/, 'payments.write'],
   ['GET', /^\/invoices(?:\/\d+(?:\/(?:pdf|pdf-status))?)?\/?$/, 'invoices.read'],
   ['POST', /^\/invoices\/?$/, 'billing.create'],
   ['POST', /^\/invoices\/quote\/?$/, 'billing.create'],
   ['POST', /^\/invoices\/\d+\/return\/?$/, 'returns.create'],
+  ['POST', /^\/invoices\/\d+\/return\/quote\/?$/, 'returns.create'],
   ['POST', /^\/invoices\/\d+\/regenerate-pdf\/?$/, 'invoices.read'],
   ['GET', /^\/dashboard\/(?:summary|sales-overview|overdue-invoices|overdue-customers|recent-activity|payment-modes)\/?$/, 'dashboard.read'],
   ['GET', /^\/reports\/(?:sales|gst|stock|stock-movement|customer-dues|profit|collections|product-categories)\/?$/, 'reports.read'],
@@ -61,7 +70,10 @@ function redactCatalog(body) {
       products: data.products.map((product) => pick(product, PRODUCT_FIELDS)),
     } };
   }
-  if (Array.isArray(data.conversions)) return { success: true, data: { conversions: data.conversions.map((conversion) => pick(conversion, CONVERSION_FIELDS)) } };
+  if (Array.isArray(data.conversions)) return { success: true, data: {
+    ...pick(data, PRODUCT_FIELDS),
+    conversions: data.conversions.map((conversion) => pick(conversion, CONVERSION_FIELDS)),
+  } };
   return { success: true, data: pick(data, PRODUCT_FIELDS) };
 }
 

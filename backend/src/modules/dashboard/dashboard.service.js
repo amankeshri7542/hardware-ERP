@@ -1,309 +1,137 @@
 const { pool } = require('../../config/db');
-
-/**
- * Dashboard summary: today's sales, collections, outstanding, counts.
- * Uses a single query with subqueries for efficiency.
- */
-async function getDashboardSummary() {
-  const { rows } = await pool.query(`
-    SELECT
-      (SELECT COALESCE(SUM(i.grand_total), 0)
-       FROM invoices i
-       WHERE i.date = CURRENT_DATE) AS today_sales,
-
-      (SELECT COALESCE(SUM(p.amount), 0)
-       FROM payments p
-       WHERE p.payment_date = CURRENT_DATE) AS today_collections,
-
-      (SELECT COALESCE(SUM(c.outstanding_balance), 0)
-       FROM customers c
-       WHERE c.is_active = true) AS total_outstanding,
-
-      (SELECT COUNT(c.id)
-       FROM customers c
-       WHERE c.is_active = true) AS total_customers,
-
-      (SELECT COUNT(p.id)
-       FROM products p
-       WHERE p.is_active = true) AS total_products,
-
-      (SELECT COUNT(p.id)
-       FROM products p
-       WHERE p.current_stock <= p.min_stock
-         AND p.current_stock > 0
-         AND p.is_active = true) AS low_stock_count,
-
-      (SELECT COUNT(p.id)
-       FROM products p
-       WHERE p.current_stock = 0
-         AND p.is_active = true) AS out_of_stock_count,
-
-      (SELECT COALESCE(SUM(amount), 0)
-       FROM supplier_debit_notes
-       WHERE status = 'outstanding') AS outstanding_debit_notes_total,
-
-      (SELECT COUNT(id)
-       FROM supplier_debit_notes
-       WHERE status = 'outstanding') AS outstanding_debit_notes_count
-  `);
-
-  const row = rows[0];
-  return {
-    today_sales: parseFloat(row.today_sales),
-    today_collections: parseFloat(row.today_collections),
-    total_outstanding: parseFloat(row.total_outstanding),
-    total_customers: parseInt(row.total_customers, 10),
-    total_products: parseInt(row.total_products, 10),
-    low_stock_count: parseInt(row.low_stock_count, 10),
-    out_of_stock_count: parseInt(row.out_of_stock_count, 10),
-    outstanding_debit_notes_total: parseFloat(row.outstanding_debit_notes_total),
-    outstanding_debit_notes_count: parseInt(row.outstanding_debit_notes_count, 10),
-  };
+const { decimal, format, date } = require('../../utils/financial');
+const reporting = require('../settlements/reporting');
+const money = value => decimal(value,2);
+const number = value => Number(value);
+function pageOptions({page=1,limit=20}={}) { return { page:Math.max(1,parseInt(page,10)||1),limit:Math.min(100,Math.max(1,parseInt(limit,10)||20)) }; }
+function paginate(rows,options) { return {rows:rows.slice((options.page-1)*options.limit,options.page*options.limit),pagination:{...options,total:rows.length,totalPages:Math.ceil(rows.length/options.limit)}}; }
+function range({from,to}={},month=false) {
+  const end=date(to||reporting.today());
+  return reporting.normalize({from:from||(month?end.slice(0,7)+'-01':new Date(Date.parse(end)-30*86400000).toISOString().slice(0,10)),to:end});
 }
-
-/**
- * Daily sales aggregation over a date range.
- * Defaults to last 30 days if no range provided.
- */
-async function getSalesOverview({ from, to } = {}) {
-  const defaultTo = new Date().toISOString().slice(0, 10);
-  const defaultFrom = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
-  const fromDate = from || defaultFrom;
-  const toDate = to || defaultTo;
-
-  const { rows } = await pool.query(
-    `SELECT
-       d.date,
-       COALESCE(SUM(i.grand_total), 0) AS total_sales,
-       COUNT(i.id)::INTEGER AS invoice_count,
-       COALESCE((
-         SELECT SUM(p.amount)
-         FROM payments p
-         WHERE p.payment_date = d.date
-       ), 0) AS total_collections
-     FROM generate_series($1::date, $2::date, '1 day'::interval) AS d(date)
-     LEFT JOIN invoices i ON i.date = d.date::date
-     GROUP BY d.date
-     ORDER BY d.date ASC`,
-    [fromDate, toDate]
-  );
-
-  return rows.map((r) => ({
-    date: r.date,
-    total_sales: parseFloat(r.total_sales),
-    invoice_count: parseInt(r.invoice_count, 10),
-    total_collections: parseFloat(r.total_collections),
-  }));
+async function customerAccounts(client,asOf) {
+  const {rows:customers}=await client.query(`SELECT c.id FROM customers c WHERE
+    EXISTS(SELECT 1 FROM invoices i WHERE i.customer_id=c.id AND i.date<=$1) OR
+    EXISTS(SELECT 1 FROM payments p WHERE p.customer_id=c.id AND p.payment_date<=$1) ORDER BY c.id`,[asOf]);
+  const accounts=[];
+  for(const customer of customers) accounts.push(await require('../settlements/customer').accountData(client,customer.id,{as_of:asOf}));
+  return accounts;
 }
-
-/**
- * Overdue invoices: unpaid/partial with due_date in the past.
- * Paginated, optionally filtered by minimum days overdue.
- */
-async function getOverdueInvoices({ page = 1, limit = 20, days_overdue } = {}) {
-  const parsedPage = Math.max(1, parseInt(page, 10) || 1);
-  const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
-  const offset = (parsedPage - 1) * parsedLimit;
-
-  const params = [];
-  let daysFilter = '';
-
-  if (days_overdue !== undefined && days_overdue !== null && days_overdue !== '') {
-    params.push(parseInt(days_overdue, 10));
-    daysFilter = `AND (CURRENT_DATE - i.due_date) >= $${params.length}`;
+function customerFacts(accounts,asOf) {
+  let due=0n,credits=0n,unknown=false;
+  for(const account of accounts) {
+    const age=reporting.aging(account.invoices,account.sources,asOf);
+    due+=money(age.total_due);credits+=money(age.available_credit);
+    unknown ||= age.reconciliation_required || account.invoices.some(i=>!i.party_snapshot);
   }
+  return {total_outstanding:number(format(due)),customer_available_credit:number(format(credits)),reconciliation_required:unknown};
+}
+async function customerMoney(client,dates) { return (await reporting.cashDataset(client,dates)).filter(row=>row.supplier_id===null); }
 
-  const baseWhere = `
-    i.status IN ('unpaid', 'partial')
-    AND i.due_date IS NOT NULL
-    AND i.due_date < CURRENT_DATE
-    ${daysFilter}
-  `;
-
-  // Count query
-  const countResult = await pool.query(
-    `SELECT COUNT(i.id) AS total
-     FROM invoices i
-     WHERE ${baseWhere}`,
-    params
-  );
-  const total = parseInt(countResult.rows[0].total, 10);
-
-  // Data query
-  const dataParams = [...params, parsedLimit, offset];
-  const { rows } = await pool.query(
-    `SELECT
-       i.invoice_no,
-       COALESCE(c.name, i.customer_name_walkin) AS customer_name,
-       i.date,
-       i.due_date,
-       i.grand_total,
-       i.balance_due,
-       (CURRENT_DATE - i.due_date) AS days_overdue
-     FROM invoices i
-     LEFT JOIN customers c ON c.id = i.customer_id
-     WHERE ${baseWhere}
-     ORDER BY (CURRENT_DATE - i.due_date) DESC
-     LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
-    dataParams
-  );
-
-  return {
-    invoices: rows.map((r) => ({
-      ...r,
-      grand_total: parseFloat(r.grand_total),
-      balance_due: parseFloat(r.balance_due),
-      days_overdue: parseInt(r.days_overdue, 10),
-    })),
-    pagination: {
-      total,
-      page: parsedPage,
-      limit: parsedLimit,
-      totalPages: Math.ceil(total / parsedLimit),
-    },
-  };
+async function unverifiedInvoiceDates(client,from,to) {
+  const {rows}=await client.query('SELECT id,original_invoice_id,date::text AS date,customer_snapshot FROM invoices WHERE date BETWEEN $1 AND $2',[from,to]);
+  const sources=new Map(),unknown=new Set();
+  for(const row of rows) {
+    const id=row.original_invoice_id||row.id;
+    if(!sources.has(id)) {
+      try {await require('../../utils/invoiceReconciliation').requireReconciledInvoice(client,id);sources.set(id,true);}
+      catch(error){if(!error.errorCode)throw error;sources.set(id,false);}
+    }
+    if(!sources.get(id)||!row.customer_snapshot)unknown.add(row.date);
+  }
+  return unknown;
 }
 
-/**
- * Customers with outstanding balance > 0 and at least one overdue invoice.
- * Paginated, ordered by outstanding_balance DESC.
- */
-async function getOverdueCustomers({ page = 1, limit = 20 } = {}) {
-  const parsedPage = Math.max(1, parseInt(page, 10) || 1);
-  const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
-  const offset = (parsedPage - 1) * parsedLimit;
-
-  const countResult = await pool.query(
-    `SELECT COUNT(DISTINCT c.id) AS total
-     FROM customers c
-     INNER JOIN invoices i ON i.customer_id = c.id
-       AND i.status IN ('unpaid', 'partial')
-       AND i.due_date IS NOT NULL
-       AND i.due_date < CURRENT_DATE
-     WHERE c.outstanding_balance > 0
-       AND c.is_active = true`
-  );
-  const total = parseInt(countResult.rows[0].total, 10);
-
-  const { rows } = await pool.query(
-    `SELECT
-       c.id,
-       c.name,
-       c.phone,
-       c.outstanding_balance,
-       MIN(i.due_date) AS oldest_overdue_date,
-       COALESCE(SUM(i.balance_due), 0) AS total_overdue_amount,
-       COUNT(i.id)::INTEGER AS overdue_invoice_count
-     FROM customers c
-     INNER JOIN invoices i ON i.customer_id = c.id
-       AND i.status IN ('unpaid', 'partial')
-       AND i.due_date IS NOT NULL
-       AND i.due_date < CURRENT_DATE
-     WHERE c.outstanding_balance > 0
-       AND c.is_active = true
-     GROUP BY c.id, c.name, c.phone, c.outstanding_balance
-     ORDER BY c.outstanding_balance DESC
-     LIMIT $1 OFFSET $2`,
-    [parsedLimit, offset]
-  );
-
-  return {
-    customers: rows.map((r) => ({
-      ...r,
-      outstanding_balance: parseFloat(r.outstanding_balance),
-      total_overdue_amount: parseFloat(r.total_overdue_amount),
-    })),
-    pagination: {
-      total,
-      page: parsedPage,
-      limit: parsedLimit,
-      totalPages: Math.ceil(total / parsedLimit),
-    },
-  };
+// Keep receivables, refundable customer sources and supplier claims separate.
+async function getDashboardSummary() {
+  const asOf=reporting.today();
+  return reporting.readTransaction(async client=>{
+    const accounts=await customerAccounts(client,asOf);
+    const facts=customerFacts(accounts,asOf);
+    const unknownSales=await unverifiedInvoiceDates(client,asOf,asOf);
+    const cashRows=await customerMoney(client,{from:asOf,to:asOf});const cash=reporting.cashSummary(cashRows);
+    const {rows:[counts]}=await client.query(`SELECT
+      (SELECT COUNT(*)::int FROM customers WHERE is_active=true) AS total_customers,
+      (SELECT COUNT(*)::int FROM products WHERE is_active=true) AS total_products,
+      (SELECT COUNT(*)::int FROM products WHERE is_active=true AND current_stock<=min_stock AND current_stock>0) AS low_stock_count,
+      (SELECT COUNT(*)::int FROM products WHERE is_active=true AND current_stock=0) AS out_of_stock_count`);
+    const {rows:[sales]}=await client.query(`SELECT COALESCE(SUM(grand_total),0)::text AS net,
+      COALESCE(SUM(grand_total) FILTER(WHERE document_kind IS DISTINCT FROM 'sales_return'),0)::text AS gross,
+      COALESCE(-SUM(grand_total) FILTER(WHERE document_kind='sales_return'),0)::text AS returns,
+      COALESCE(BOOL_OR(customer_snapshot IS NULL),false) AS unknown FROM invoices WHERE date=$1`,[asOf]);
+    const {rows:suppliers}=await client.query(`SELECT DISTINCT supplier_id FROM supplier_debit_notes
+      UNION SELECT supplier_id FROM supplier_payables ORDER BY supplier_id`);
+    let claim=0n,payable=0n,claimCount=0,unknown=facts.reconciliation_required||unknownSales.size>0||sales.unknown||cashRows.some(r=>!r.party_snapshot);
+    for(const supplier of suppliers) {
+      const account=await require('../settlements/supplier').accountData(client,supplier.supplier_id,{as_of:asOf});
+      unknown ||= account.reconciliation_required;
+      for(const source of account.debits) if(source.eligible) {claim+=money(source.available);if(money(source.available)>0n)claimCount++;}
+      for(const source of account.payables) if(source.eligible) payable+=money(source.due);
+    }
+    return {...counts,...facts,as_of:asOf,timezone:'Asia/Kolkata',today_sales:number(sales.net),today_gross_sales:number(sales.gross),today_sales_returns:number(sales.returns),
+      today_collections:number(cash.incoming),today_refunds:number(cash.outgoing),today_net_collections:number(cash.net),
+      outstanding_debit_notes_total:number(format(claim)),outstanding_debit_notes_count:claimCount,total_supplier_payables:number(format(payable)),reconciliation_required:unknown};
+  });
 }
-
-/**
- * Recent activity: last N invoices + payments combined via UNION ALL.
- */
-async function getRecentActivity({ limit = 10 } = {}) {
-  const parsedLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
-
-  const { rows } = await pool.query(
-    `SELECT activity_type, id, reference, amount, date, customer_name, created_at
-     FROM (
-       SELECT
-         'invoice' AS activity_type,
-         i.id,
-         i.invoice_no AS reference,
-         i.grand_total AS amount,
-         i.date,
-         COALESCE(c.name, i.customer_name_walkin) AS customer_name,
-         i.created_at
-       FROM invoices i
-       LEFT JOIN customers c ON c.id = i.customer_id
-
-       UNION ALL
-
-       SELECT
-         'payment' AS activity_type,
-         p.id,
-         p.reference_no AS reference,
-         p.amount,
-         p.payment_date AS date,
-         c.name AS customer_name,
-         p.created_at
-       FROM payments p
-       LEFT JOIN customers c ON c.id = p.customer_id
-     ) AS activity
-     ORDER BY date DESC, created_at DESC
-     LIMIT $1`,
-    [parsedLimit]
-  );
-
-  return rows.map((r) => ({
-    ...r,
-    amount: parseFloat(r.amount),
-  }));
+async function getSalesOverview(query={}) {
+  const dates=range(query);
+  return reporting.readTransaction(async client=>{
+    const {rows}=await client.query(`SELECT d.day::date::text AS date,COALESCE(SUM(i.grand_total),0)::text AS total_sales,COUNT(i.id)::int AS invoice_count,
+      COALESCE(BOOL_OR(i.id IS NOT NULL AND i.customer_snapshot IS NULL),false) AS reconciliation_required
+      FROM generate_series($1::date,$2::date,'1 day') d(day) LEFT JOIN invoices i ON i.date=d.day::date GROUP BY d.day ORDER BY d.day`,[dates.from,dates.to]);
+    const moneyRows=await customerMoney(client,dates);const unknownSales=await unverifiedInvoiceDates(client,dates.from,dates.to);
+    return rows.map(row=>{const cash=reporting.cashSummary(moneyRows.filter(m=>m.date===row.date));return {...row,reconciliation_required:row.reconciliation_required||unknownSales.has(row.date)||moneyRows.some(m=>m.date===row.date&&!m.party_snapshot),total_sales:number(row.total_sales),
+      total_collections:number(cash.incoming),total_refunds:number(cash.outgoing),net_collections:number(cash.net)};});
+  });
 }
-
-/**
- * Payment mode breakdown: total and count per payment mode.
- * Defaults to current month if no date range given.
- */
-async function getPaymentModeBreakdown({ from, to } = {}) {
-  const now = new Date();
-  const defaultFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-  const defaultTo = now.toISOString().slice(0, 10);
-
-  const fromDate = from || defaultFrom;
-  const toDate = to || defaultTo;
-
-  const { rows } = await pool.query(
-    `SELECT
-       p.mode,
-       COALESCE(SUM(p.amount), 0) AS total,
-       COUNT(p.id)::INTEGER AS count
-     FROM payments p
-     WHERE p.payment_date >= $1::date
-       AND p.payment_date <= $2::date
-     GROUP BY p.mode
-     ORDER BY total DESC`,
-    [fromDate, toDate]
-  );
-
-  return rows.map((r) => ({
-    mode: r.mode,
-    total: parseFloat(r.total),
-    count: parseInt(r.count, 10),
-  }));
+async function overdueData(client,asOf) {
+  const accounts=await customerAccounts(client,asOf);const invoices=[];
+  for(const account of accounts) for(const invoice of account.invoices) {
+    if(invoice.eligible===false||invoice.balance_due===null||money(invoice.balance_due)===0n||!invoice.due_date||invoice.due_date>=asOf)continue;
+    invoices.push({...invoice,customer_id:account.customer.id,customer_name:invoice.party_snapshot?.name||'Unknown issued party',customer_phone:invoice.party_snapshot?.phone||null,
+      grand_total:number(invoice.grand_total),balance_due:number(invoice.balance_due),days_overdue:Math.floor((Date.parse(asOf)-Date.parse(invoice.due_date))/86400000)});
+  }
+  invoices.sort((a,b)=>b.days_overdue-a.days_overdue||a.id-b.id);
+  return {accounts,invoices,reconciliation_required:customerFacts(accounts,asOf).reconciliation_required};
 }
-
-module.exports = {
-  getDashboardSummary,
-  getSalesOverview,
-  getOverdueInvoices,
-  getOverdueCustomers,
-  getRecentActivity,
-  getPaymentModeBreakdown,
-};
+async function getOverdueInvoices(query={}) {
+  const options=pageOptions(query),asOf=reporting.today();
+  return reporting.readTransaction(async client=>{
+    const data=await overdueData(client,asOf);const days=query.days_overdue?Math.max(0,parseInt(query.days_overdue,10)||0):0;
+    const result=paginate(data.invoices.filter(i=>i.days_overdue>=days),options);
+    return {invoices:result.rows,pagination:result.pagination,as_of:asOf,reconciliation_required:data.reconciliation_required};
+  });
+}
+async function getOverdueCustomers(query={}) {
+  const options=pageOptions(query),asOf=reporting.today();
+  return reporting.readTransaction(async client=>{
+    const data=await overdueData(client,asOf);const rows=[];
+    for(const account of data.accounts) {
+      const invoices=data.invoices.filter(i=>i.customer_id===account.customer.id);if(!invoices.length)continue;
+      const age=reporting.aging(account.invoices,account.sources,asOf);
+      rows.push({...account.customer,outstanding_balance:number(age.total_due),available_credit:number(age.available_credit),oldest_overdue_date:invoices.map(i=>i.due_date).sort()[0],
+        total_overdue_amount:number(age.overdue),overdue_invoice_count:invoices.length});
+    }
+    rows.sort((a,b)=>b.outstanding_balance-a.outstanding_balance||a.id-b.id);const result=paginate(rows,options);
+    return {customers:result.rows,pagination:result.pagination,as_of:asOf,reconciliation_required:data.reconciliation_required};
+  });
+}
+// This feed deliberately describes issued invoices and original receipts, not net cash.
+async function getRecentActivity({limit=10}={}) {
+  const parsedLimit=Math.min(50,Math.max(1,parseInt(limit,10)||10));
+  const {rows}=await pool.query(`SELECT * FROM (
+    SELECT 'invoice' AS activity_type,id,invoice_no AS reference,grand_total AS amount,date,COALESCE(customer_snapshot->>'name','Unknown issued party') AS customer_name,created_at FROM invoices
+    UNION ALL SELECT 'payment',id,reference_no,amount,payment_date,COALESCE(customer_snapshot->>'name','Unknown issued party'),created_at FROM payments
+    ) activity ORDER BY date DESC,created_at DESC LIMIT $1`,[parsedLimit]);
+  return rows.map(r=>({...r,amount:number(r.amount)}));
+}
+async function getPaymentModeBreakdown(query={}) {
+  const dates=range(query,true);
+  return reporting.readTransaction(async client=>{
+    const rows=await customerMoney(client,dates);const totals=reporting.cashSummary(rows);
+    return Object.entries(totals.by_mode).filter(([mode])=>rows.some(r=>r.mode===mode)).map(([mode,values])=>({mode,total:number(values.incoming),count:rows.filter(r=>r.mode===mode&&r.direction==='in').length,
+      incoming:number(values.incoming),outgoing:number(values.outgoing),net:number(values.net),tender_portions:rows.filter(r=>r.mode===mode).length,
+      from:dates.from,to:dates.to,reconciliation_required:rows.some(r=>r.mode===mode&&!r.party_snapshot)})).sort((a,b)=>b.total-a.total||a.mode.localeCompare(b.mode));
+  });
+}
+module.exports={getDashboardSummary,getSalesOverview,getOverdueInvoices,getOverdueCustomers,getRecentActivity,getPaymentModeBreakdown};

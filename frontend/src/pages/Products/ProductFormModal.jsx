@@ -1,15 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import {
   Modal, Form, Input, InputNumber, Select, Switch, AutoComplete,
-  message, Spin, Button, Space, Typography,
+  message, Spin, Button, Space, Typography, Alert,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
-import { 
-  createProduct, updateProduct, getProduct, 
-  getUnitConversions, createUnitConversion, deleteUnitConversion,
-  getProductSuppliers, linkProductSupplier
-} from '../../api/products.api';
-import { getSuppliers } from '../../api/suppliers.api';
+import { createProduct, updateProduct, getProduct } from '../../api/products.api';
+import { useFinancialMutation } from '../../hooks/useFinancialMutation.js';
+import { decimal } from '../../utils/billing.calculations.js';
+import { financialError } from '../../utils/financialIntent.js';
+import FinancialRecovery from '../../components/FinancialRecovery.jsx';
 
 const { Text } = Typography;
 
@@ -37,112 +36,75 @@ export default function ProductFormModal({ open, onClose, onSuccess, productId }
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
-  const [suppliers, setSuppliers] = useState([]);
-  const isEdit = !!productId;
-
-  useEffect(() => {
-    if (open) {
-      getSuppliers().then(res => setSuppliers(res.data.data.suppliers || [])).catch(() => {});
-    }
-
-    if (open && productId) {
-      setFetching(true);
-      Promise.all([
-        getProduct(productId),
-        getUnitConversions(productId).catch(() => ({ data: { data: { conversions: [] } } })),
-        getProductSuppliers(productId).catch(() => ({ data: { data: { suppliers: [] } } }))
-      ])
-        .then(([prodRes, convRes, suppRes]) => {
-          const productData = prodRes.data.data;
-          const conversions = convRes.data.data.conversions || [];
-          const productSuppliers = suppRes.data.data.suppliers || [];
-          const primarySupplier = productSuppliers.find(s => s.is_primary_supplier) || productSuppliers[0];
-          
-          form.setFieldsValue({ 
-            ...productData, 
-            conversions,
-            supplier_id: primarySupplier ? primarySupplier.supplier_id : undefined
-          });
-        })
-        .catch(() => message.error('Failed to load product'))
-        .finally(() => setFetching(false));
-    } else if (open) {
-      form.resetFields();
-      form.setFieldsValue({ unit: 'piece', gst_rate: 18, min_stock: 0, current_stock: 0, is_active: true, conversions: [] });
-    }
-  }, [open, productId, form]);
-
-  const handleSubmit = async () => {
+  const [baseline,setBaseline]=useState(null);
+  const [error,setError]=useState(null);
+  const [recoveryOpen,setRecoveryOpen]=useState(false);
+  const [createRecovery,setCreateRecovery]=useState(false);
+  const mutation=useFinancialMutation('product-create',createProduct);
+  const isEdit = !!productId && !createRecovery;
+  const close=()=>{setRecoveryOpen(false);setCreateRecovery(false);onClose();};
+  const load=async()=>{
+    setFetching(true);setError(null);
     try {
-      const values = await form.validateFields();
-      setLoading(true);
-
-      const { conversions, supplier_id, ...productValues } = values;
-      let finalProductId = productId;
-
-      if (isEdit) {
-        await updateProduct(productId, productValues);
-        message.success('Product updated');
-      } else {
-        const res = await createProduct(productValues);
-        finalProductId = res.data.data ? res.data.data.id : res.data.id;
-        message.success('Product created');
-      }
-
-      // Link supplier if selected
-      if (supplier_id) {
-        await linkProductSupplier(finalProductId, {
-          supplier_id: supplier_id,
-          last_price: productValues.purchase_price,
-          is_primary_supplier: true
-        }).catch(() => message.error('Failed to link supplier'));
-      }
-
-      // Handle conversions separately
-      if (isEdit) {
-        const oldConv = await getUnitConversions(finalProductId);
-        for (const c of (oldConv.data.data.conversions || [])) {
-          await deleteUnitConversion(c.id).catch(() => {});
+      const product=await getProduct(productId);
+      const data=product.data.data;
+      if(!Array.isArray(data.conversions)) throw new Error('Missing catalog snapshot');
+      setBaseline(data);form.setFieldsValue(data);
+    } catch {setBaseline(null);setError('Could not load the complete product. Retry before saving.');}
+    finally {setFetching(false);}
+  };
+  useEffect(()=>{
+    if(!open || mutation.intent) return;
+    if(productId) load();
+    else {form.resetFields();form.setFieldsValue({unit:'piece',gst_rate:18,min_stock:0,current_stock:0,is_active:true,conversions:[]});}
+  },[open,productId,form]);
+  const handleSubmit=async()=>{
+    if(mutation.locked) return;
+    setError(null);
+    try {
+      const values=await form.validateFields();setLoading(true);
+      const {conversions=[],current_stock,...fields}=values;
+      const units=conversions.map(row=>({unit_name:row.unit_name,conversion_value:decimal(row.conversion_value,4),
+        is_sales_unit:row.is_sales_unit,is_purchase_unit:row.is_purchase_unit}));
+      if(isEdit) {
+        if(!baseline) throw new Error('Reload the product before saving.');
+        const data={expected_catalog_version:baseline.catalog_version};
+        const originalUnits=baseline.conversions.map(row=>({unit_name:row.unit_name,conversion_value:decimal(row.conversion_value,4),is_sales_unit:row.is_sales_unit,is_purchase_unit:row.is_purchase_unit}));
+        if(JSON.stringify(units)!==JSON.stringify(originalUnits)) data.conversions=units;
+        for(const [key,value] of Object.entries(fields)) {
+          if(value===undefined) continue;
+          const numeric=['mrp','wholesale_price','purchase_price','gst_rate','min_stock'].includes(key);
+          if(numeric ? decimal(value,key==='min_stock'?3:2)!==decimal(baseline[key]||0,key==='min_stock'?3:2) : value!==(baseline[key]??'')) data[key]=value;
         }
-      }
-      if (conversions && conversions.length > 0) {
-        await Promise.all(
-          conversions.map((conv) => createUnitConversion(finalProductId, conv))
-        );
-      }
-
-      onSuccess({ ...productValues, id: finalProductId });
-      onClose();
-
-    } catch (err) {
-      if (err.response?.status === 409) {
-        const errData = err.response.data;
-        if (errData.code === 'DUPLICATE_SKU') {
-          form.setFields([{ name: 'sku', errors: ['This SKU already exists'] }]);
-        } else if (errData.code === 'DUPLICATE_BARCODE') {
-          form.setFields([{ name: 'barcode', errors: ['This barcode already exists'] }]);
-        }
-      } else if (err.errorFields) {
-        // form validation error — do nothing, antd shows inline
-      } else {
-        message.error('Failed to save product');
-      }
-    } finally {
-      setLoading(false);
-    }
+        if(Object.keys(data).length===1) {message.info('No changes to save');return;}
+        const result=await updateProduct(productId,data);
+        message.success('Product updated');onSuccess(result.data.data);close();
+      } else await mutation.run({...fields,current_stock:decimal(current_stock||0,3),conversions:units},{formValues:values});
+    } catch(error) {
+      if(!error.errorFields) setError(error.response?.data?.code?financialError(error.response.data.code):error.message||'Failed to save product');
+    } finally {setLoading(false);}
   };
 
-  return (
+  return (<>
+    {mutation.intent && !open && !recoveryOpen && <Button onClick={()=>setRecoveryOpen(true)}>Recover product creation</Button>}
     <Modal
-      title={isEdit ? 'Edit Product' : 'New Product'}
-      open={open}
-      onCancel={onClose}
+      title={mutation.intent ? 'Recover product creation' : isEdit ? 'Edit Product' : 'New Product'}
+      open={open||recoveryOpen}
+      onCancel={close}
+      footer={mutation.intent?null:undefined}
       onOk={handleSubmit}
-      confirmLoading={loading}
+      confirmLoading={loading||mutation.busy}
+      okText={isEdit ? 'Save product' : 'Create product'}
+      okButtonProps={{'aria-label':isEdit ? 'Save product' : 'Create product',disabled:fetching||(isEdit&&!baseline)}}
       width={640}
       destroyOnHidden={false}
     >
-      <Spin spinning={fetching}>
+      {mutation.intent ? <FinancialRecovery mutation={mutation} label="Product creation"
+        onComplete={receipt=>{onSuccess(receipt);close();}} onEdit={saved=>{setCreateRecovery(true);form.setFieldsValue(saved.snapshot?.formValues||saved.payload);}}>
+        {mutation.intent.result && <Text>Product {mutation.intent.result.name}: opening stock {mutation.intent.result.current_stock}</Text>}
+      </FinancialRecovery> : <Spin spinning={fetching}>
+        {error && <Alert type="error" showIcon message={error} action={isEdit?<Button onClick={load}>Reload product and review</Button>:null} />}
+
         <Form form={form} layout="vertical" requiredMark="optional">
           <Form.Item name="name" label="Product Name"
             rules={[{ required: true, message: 'Required' }]}>
@@ -161,17 +123,7 @@ export default function ProductFormModal({ open, onClose, onSuccess, productId }
               />
             </Form.Item>
 
-            <Form.Item name="supplier_id" label="Primary Supplier">
-              <Select 
-                placeholder="Select a supplier"
-                allowClear
-                showSearch
-                filterOption={(input, option) =>
-                  (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                }
-                options={suppliers.map(s => ({ label: s.name, value: s.id }))}
-              />
-            </Form.Item>
+
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -239,10 +191,10 @@ export default function ProductFormModal({ open, onClose, onSuccess, productId }
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Form.Item name="current_stock" label="Current Stock"
-              extra={isEdit ? 'Set overall stock quantity' : 'Initial stock quantity'}
+            <Form.Item name="current_stock" label={isEdit?"Stock (use Count stock to change)":"Opening stock"}
+              extra={isEdit ? 'Use Count stock on the product detail page for a reasoned stock change.' : 'Initial stock quantity'}
               rules={[{ required: true, message: 'Required' }]}>
-              <InputNumber min={0} precision={3} style={{ width: '100%' }}
+              <InputNumber stringMode disabled={isEdit} min={0} precision={3} style={{ width: '100%' }}
                 placeholder="0" />
             </Form.Item>
           </div>
@@ -280,10 +232,12 @@ export default function ProductFormModal({ open, onClose, onSuccess, productId }
                         <InputNumber min={0.0001} precision={4} placeholder="Qty" style={{ width: 100 }} />
                       </Form.Item>
                       <Text>Base Units</Text>
-                      <DeleteOutlined onClick={() => remove(name)} style={{ color: 'red', marginLeft: 8 }} />
+                    <Form.Item {...restField} name={[name,'is_sales_unit']} label="Sales unit" valuePropName="checked"><Switch /></Form.Item>
+                    <Form.Item {...restField} name={[name,'is_purchase_unit']} label="Purchase unit" valuePropName="checked"><Switch /></Form.Item>
+                      <Button aria-label="Remove conversion" onClick={()=>remove(name)} icon={<DeleteOutlined />} />
                     </Space>
                   ))}
-                  <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                  <Button type="dashed" onClick={() => add({conversion_value:1,is_sales_unit:true,is_purchase_unit:true})} block icon={<PlusOutlined />}>
                     Add Unit Conversion
                   </Button>
                 </>
@@ -295,7 +249,7 @@ export default function ProductFormModal({ open, onClose, onSuccess, productId }
             <Switch />
           </Form.Item>
         </Form>
-      </Spin>
-    </Modal>
+      </Spin>}
+    </Modal></>
   );
 }

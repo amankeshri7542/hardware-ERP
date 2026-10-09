@@ -67,8 +67,8 @@ async function getProduct(req, res, next) {
  */
 async function createProduct(req, res, next) {
   try {
-    const product = await productsService.createProduct(req.body);
-    return res.status(201).json({ success: true, data: product });
+    const result = await productsService.createProduct(req.body, req.user.id, req.get('Idempotency-Key'));
+    return res.status(result.status).json(result.body);
   } catch (err) {
     next(err);
   }

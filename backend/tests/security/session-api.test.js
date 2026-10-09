@@ -136,6 +136,11 @@ test('cashier responses omit costs on every catalog read path and deny privilege
     assert.ok(!/purchase_price|cost_price|profit|supplier|last_price/.test(JSON.stringify(response.body)), path);
   }
   assert.equal((await get(`/api/products/${id}`, admin.cookie)).body.data.purchase_price, '41.00');
+  const publicProduct = (await get(`/api/products/${id}`, user.cookie)).body.data;
+  assert.equal(publicProduct.id, id);
+  assert.equal(publicProduct.name, `SyntheticSecurity${process.pid}`);
+  assert.equal(publicProduct.conversions[0].unit_name, 'box');
+  assert.equal(publicProduct.conversions[0].conversion_value, '12.0000');
   const conversions = await get(`/api/products/${id}/unit-conversions`, user.cookie);
   assert.equal(conversions.status, 200);
   assert.equal(conversions.body.data.conversions[0].unit_name, 'box');

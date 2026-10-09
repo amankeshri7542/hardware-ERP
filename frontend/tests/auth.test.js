@@ -20,7 +20,7 @@ test('capability navigation defaults to denial and keeps cashiers in the catalog
   const cashier = { capabilities: ['catalog.read'] };
   assert.equal(homePath(cashier), '/products');
   assert.equal(canAccessPath(cashier, '/products'), true);
-  for (const path of ['/billing', '/billing/quick', '/products/1', '/invoices', '/reports', '/settings']) {
+  for (const path of ['/billing', '/billing/quick', '/products/1', '/invoices', '/reports', '/settings', '/settlements', '/settlements/customer/1', '/settlements/supplier/1', '/settlements/anonymous', '/settlements/day', '/settlements/reports']) {
     assert.equal(canAccessPath(cashier, path), false, path);
   }
   assert.equal(canAccessPath({ role: 'admin' }, '/billing'), false, 'Role text alone is not a capability');

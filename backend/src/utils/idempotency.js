@@ -33,6 +33,9 @@ async function withIdempotency({ actorId, operation, key, intent }, action) {
       await client.query('COMMIT');
       return { status: previous.status_code, body: previous.response_body, replayed: true };
     }
+    await require('./financialPeriod').requireOpenDate(client,
+      intent.date ?? intent.return_date ?? intent.payment_date,
+      { exclusive: ['finance.day_close', 'finance.day_open'].includes(operation) });
     const result = await action(client);
     if (!Number.isInteger(result?.status) || result.status < 200 || result.status > 299 || !result.body) {
       throw new Error('An idempotent operation must return a successful response');

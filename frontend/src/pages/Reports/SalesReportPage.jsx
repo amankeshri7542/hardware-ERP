@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Row, Col, Card, Statistic, Table, Button, DatePicker, Select, Space, Tag, message } from 'antd';
+import { Alert, Row, Col, Card, Statistic, Table, Button, DatePicker, Select, Space, Tag, message } from 'antd';
 import { DownloadOutlined, FilePdfOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import ReportLayout from '../../components/Reports/ReportLayout';
@@ -34,6 +34,8 @@ export default function SalesReportPage() {
 
   const [dateRange, setDateRange] = useState([dayjs().startOf('month'), dayjs()]);
   const [billType, setBillType] = useState('');
+  const generation = useRef(0);
+  const [reconciliation, setReconciliation] = useState(false);
   const [data, setData] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -42,7 +44,7 @@ export default function SalesReportPage() {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 50, total: 0 });
 
   const fetchData = useCallback(async (page = 1) => {
-    setLoading(true);
+    const request = ++generation.current; setLoading(true); setData([]); setSummary(null);
     try {
       const params = {
         from: dateRange[0].format('YYYY-MM-DD'),
@@ -53,7 +55,9 @@ export default function SalesReportPage() {
       if (billType) params.bill_type = billType;
 
       const res = await getSalesReport(params);
+      if (request !== generation.current) return;
       const result = res.data.data;
+      setReconciliation(result.reconciliation_required === true);
       setData(result.invoices || []);
       setSummary(result.summary || null);
       setPagination((prev) => ({
@@ -62,14 +66,15 @@ export default function SalesReportPage() {
         total: result.total || result.summary?.total_invoices || 0,
       }));
     } catch {
-      message.error('Failed to load sales report');
+      if (request === generation.current) message.error('Failed to load sales report');
     } finally {
-      setLoading(false);
+      if (request === generation.current) setLoading(false);
     }
   }, [dateRange, billType]);
 
   useEffect(() => {
     fetchData(1);
+    return () => { generation.current++; };
   }, [fetchData]);
 
   const handleExport = async () => {
@@ -128,7 +133,7 @@ export default function SalesReportPage() {
       dataIndex: 'customer_name',
       key: 'customer_name',
       ellipsis: true,
-      render: (val) => val || 'Walk-in',
+      render: (val) => val || 'Unknown issued identity',
     },
     {
       title: 'Type',
@@ -146,7 +151,7 @@ export default function SalesReportPage() {
       render: (val) => formatINR(val),
     },
     {
-      title: 'Paid',
+      title: 'Net direct receipts as of end',
       dataIndex: 'amount_paid',
       key: 'amount_paid',
       align: 'right',
@@ -171,7 +176,7 @@ export default function SalesReportPage() {
       </Col>
       <Col xs={12} sm={8} lg={4}>
         <Card size="small" bordered={false} style={{ background: '#f6ffed' }}>
-          <Statistic title="Total Sales" value={summary.total_sales || 0} formatter={(val) => formatINR(val)} />
+          <Statistic title="Net sales" value={summary.total_sales || 0} formatter={(val) => formatINR(val)} />
         </Card>
       </Col>
       <Col xs={12} sm={8} lg={4}>
@@ -181,7 +186,7 @@ export default function SalesReportPage() {
       </Col>
       <Col xs={12} sm={8} lg={4}>
         <Card size="small" bordered={false} style={{ background: '#f9f0ff' }}>
-          <Statistic title="Total Collected" value={summary.total_collected || 0} formatter={(val) => formatINR(val)} />
+          <Statistic title="Receipts in date range" value={summary.total_collected || 0} formatter={(val) => formatINR(val)} />
         </Card>
       </Col>
       <Col xs={12} sm={8} lg={4}>
@@ -229,7 +234,7 @@ export default function SalesReportPage() {
           </>
         }
         filters={filters}
-        summary={summaryCards}
+        summary={<>{reconciliation && <Alert type="warning" showIcon message="These reported figures include unverified issued evidence. Review reconciliation flags before using the balances." />}{summaryCards}</>}
         loading={loading}
         table={
           <Table

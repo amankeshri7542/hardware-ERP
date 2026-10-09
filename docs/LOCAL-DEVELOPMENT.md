@@ -2,6 +2,10 @@
 
 This setup is for disposable synthetic data only. Production release remains blocked by `RELEASE-BLOCKERS.md`. Never point test commands at a real shop database. Do not copy credentials from old documentation or history.
 
+Phase 4 adds migrations 018–021 and admin settlement/day-close screens. Follow `PHASE-4-OPERATIONS.md` and `FINANCIAL-SETTLEMENT-CONTRACT.md`; apply current grants after migrations. Run all backend gates, original release invariants, frontend auth/financial tests and all four browser suites (including `test:phase4-browser`). `backend/tests/phase4/clean-scenario.test.js` creates separate clean and corrupt databases; day-close tests likewise use isolated databases so closed dates cannot contaminate other fixtures.
+
+For every synthetic Node process set `NODE_OPTIONS=--require=<absolute-worktree>/scripts/local-only-network.cjs` **before startup**, including tests/build/API children. The browser harness additionally blocks external redirects, WebSockets and service workers before navigation. Build with Vite `envDir:false` and explicit `/api`; do not load a live `.env`. Documentation/dependency retrieval is a separate activity, never permission for test runtime egress. Exact executed commands and native runtime paths are in `PHASE-4-TEST-EVIDENCE.md`.
+
 ## Runtime and deterministic installation
 
 Use Node **24.21.0** and npm **11.17.0**. Node 24 is supported LTS through April 2028; this patch was available and executed during verification. `.nvmrc`, `.node-version`, both manifests, lockfiles, CI and Docker agree. Use a version manager to select `.nvmrc`, then install the exact npm version. Commands below are ordinary shell commands; the Codex session used an `rtk` wrapper.

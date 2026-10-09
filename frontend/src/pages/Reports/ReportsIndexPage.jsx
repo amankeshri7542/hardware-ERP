@@ -15,6 +15,7 @@ import { exportReport } from '../../api/reports.api';
 const { Title, Text } = Typography;
 
 const REPORT_CARDS = [
+  { title: 'Settlement Reports', description: 'Separate sales, returns, customer receipts/refunds, supplier money movements, and dated statements.', icon: <WalletOutlined style={{ fontSize: 32, color: '#13c2c2' }} />, path: '/settlements/reports', color: '#e6fffb' },
   {
     title: 'Sales Report',
     description: 'View sales by date range and bill type with totals and profit summary.',

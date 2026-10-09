@@ -8,7 +8,7 @@ export function canAccessPath(user, path) {
     ['/products', 'cost.read'], ['/billing', 'billing.create'],
     ['/invoices', 'invoices.read'], ['/customers', 'customers.read'],
     ['/suppliers', 'suppliers.read'], ['/purchases', 'purchases.read'],
-    ['/payments', 'payments.read'], ['/reports', 'reports.read'],
+    ['/settlements', 'finance.read'], ['/payments', 'payments.read'], ['/reports', 'reports.read'],
     ['/settings', 'settings.read'], ['/dashboard', 'dashboard.read'],
   ].find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`))?.[1];
   return Boolean(capability && hasCapability(user, capability));

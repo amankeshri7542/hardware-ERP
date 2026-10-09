@@ -8,7 +8,9 @@ export const getPdfStatus = (id) => api.get(`/invoices/${id}/pdf-status`);
 export const getPdfUrl = (id) => api.get(`/invoices/${id}/pdf`);
 export const downloadPdfBlob = (id) => api.get(`/invoices/${id}/pdf`, { responseType: 'blob' });
 export const regeneratePdf = (id) => api.post(`/invoices/${id}/regenerate-pdf`);
-export const processReturn = (id, data) => api.post(`/invoices/${id}/return`, data);
+export const quoteReturn = data => api.post(`/invoices/${data.original_invoice_id}/return/quote`, data);
+export const processReturn = (data, key, actorId) => api.post(`/invoices/${data.original_invoice_id}/return`, data,
+  { timeout:15000,headers:{'Idempotency-Key':key,'Idempotency-Actor':String(actorId)} });
 
 /**
  * Download and open invoice PDF in a new tab.

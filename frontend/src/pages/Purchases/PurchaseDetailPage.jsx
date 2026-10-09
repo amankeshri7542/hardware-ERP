@@ -5,7 +5,8 @@ import {
   Input, Alert,
 } from 'antd';
 import { ArrowLeftOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
-import { getPurchase, updatePurchaseNotes } from '../../api/purchases.api';
+import { getPurchase, getPurchaseReturns, updatePurchaseNotes } from '../../api/purchases.api';
+import { scaled, formatted } from '../../utils/billing.calculations.js';
 import { formatINR, formatDate } from '../../utils/formatCurrency';
 import PurchaseReturnModal from '../../components/PurchaseReturnModal/PurchaseReturnModal';
 
@@ -14,6 +15,7 @@ const { Title } = Typography;
 export default function PurchaseDetailPage() {
   const { id } = useParams();
   const [purchase, setPurchase] = useState(null);
+  const [returns, setReturns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [returnModalOpen, setReturnModalOpen] = useState(false);
   const [editingNotes, setEditingNotes] = useState(false);
@@ -21,8 +23,8 @@ export default function PurchaseDetailPage() {
 
   const fetchPurchase = () => {
     setLoading(true);
-    getPurchase(id)
-      .then(({ data }) => setPurchase(data.data))
+    Promise.all([getPurchase(id), getPurchaseReturns(id)])
+      .then(([receipt, returned]) => { setPurchase(receipt.data.data); setReturns(returned.data.data.returns || []); })
       .catch(() => message.error('Failed to load purchase'))
       .finally(() => setLoading(false));
   };
@@ -47,9 +49,11 @@ export default function PurchaseDetailPage() {
 
   const columns = [
     { title: 'Product', dataIndex: 'product_name', key: 'product_name', render: (t) => <strong>{t}</strong> },
-    { title: 'Qty', dataIndex: 'qty', key: 'qty', width: 80, align: 'right' },
+    { title: 'Selected quantity', dataIndex: 'qty', key: 'qty', width: 100, align: 'right' },
     { title: 'Unit', dataIndex: 'unit', key: 'unit', width: 80 },
-    { title: 'Cost Price', dataIndex: 'cost_price', key: 'cost_price', width: 120, render: (v) => formatINR(v), align: 'right' },
+    { title: 'Original price / unit', dataIndex: 'cost_price', key: 'cost_price', width: 150, render: (v, item) => `${formatINR(v)} / ${item.unit}`, align: 'right' },
+    { title: 'Base stock received', key: 'base', render: (_, item) => item.base_unit_snapshot ? `${item.base_qty} ${item.base_unit_snapshot}` : 'Historical unit requires reconciliation' },
+    { title: 'Remaining returnable', key: 'remaining', render: (_, item) => purchase.contract_version === 'phase3-v1' ? `${formatted(scaled(item.qty, 3) - scaled(item.qty_returned || '0', 3), 3)} ${item.unit}` : 'Reconciliation required' },
     { title: 'Line Total', dataIndex: 'line_total', key: 'line_total', width: 120, render: (v) => formatINR(v), align: 'right' },
   ];
 
@@ -67,7 +71,7 @@ export default function PurchaseDetailPage() {
       <Card style={{ marginTop: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <Title level={4} style={{ margin: 0 }}>{purchase.po_number}</Title>
-          <Button type="default" danger onClick={() => setReturnModalOpen(true)}>Create Return</Button>
+          <Button type="default" danger disabled={purchase.contract_version !== 'phase3-v1'} onClick={() => setReturnModalOpen(true)}>Create Return</Button>
         </div>
         <Descriptions column={3} size="small">
           <Descriptions.Item label="Date">{formatDate(purchase.date)}</Descriptions.Item>
@@ -120,6 +124,30 @@ export default function PurchaseDetailPage() {
             </div>
           )}
         />
+      </Card>
+
+      {purchase.contract_version !== 'phase3-v1' && <Alert style={{ marginTop: 16 }} type="warning" showIcon message="This historical purchase needs reconciliation before a supplier return can be posted." />}
+      <Card title="Supplier returns" style={{ marginTop: 16 }}>
+        <Table dataSource={returns} rowKey="id" pagination={false} size="small" onRow={record => ({ id: `supplier-return-${record.id}` })}
+          columns={[
+            { title: 'Return', dataIndex: 'return_no' }, { title: 'Date', dataIndex: 'date', render: formatDate },
+            { title: 'Amount', dataIndex: 'total_amount', render: formatINR },
+            { title: 'Stock posting', dataIndex: 'status', render: value => <Tag>{value || 'Historical'}</Tag> },
+            { title: 'Debit notes', render: (_, record) => (record.debit_notes || []).map(note => <div key={note.id}><a href={`#supplier-debit-${note.id}`}>{note.debit_note_no}</a></div>) },
+          ]}
+          expandable={{ expandedRowRender: record => <Table dataSource={record.items} rowKey="id" pagination={false} size="small" columns={[
+            { title: 'Original product', dataIndex: 'product_name' },
+            { title: 'Selected returned', render: (_, item) => `${item.qty_returned} ${item.unit || ''}` },
+            { title: 'Base stock removed', render: (_, item) => item.base_unit_snapshot ? `${item.base_qty} ${item.base_unit_snapshot}` : 'Historical unit unknown' },
+            { title: 'Original price / unit', dataIndex: 'cost_price', render: formatINR },
+            { title: 'Allocated value', dataIndex: 'amount', render: formatINR },
+          ]} /> }} />
+      </Card>
+      <Card title="Linked supplier debit notes" style={{ marginTop: 16 }}>
+        {returns.flatMap(record => (record.debit_notes || []).map(note => <p id={`supplier-debit-${note.id}`} key={note.id}>
+          <strong>{note.debit_note_no}</strong> — {formatINR(note.amount)}, <Tag>{note.status}</Tag> from <a href={`#supplier-return-${record.id}`}>{record.return_no}</a>.
+        </p>))}
+        <Typography.Text type="secondary">Outstanding debit notes record the supplier obligation. No settlement has been recorded by these returns.</Typography.Text>
       </Card>
 
       <PurchaseReturnModal

@@ -7,6 +7,8 @@ synthetic credentials; see PHASE-1-REPORT and FRONTEND-EVIDENCE for the known fa
 and the subsequently enforced local-only network guard. Operators must record
 evidence for the pending actions below.
 
+Phase 4 adds admin-only `finance.read`/`finance.write` settlement and close operations. Confirmations are operator records, never proof of provider execution. Preserve actor-scoped idempotency results and browser recovery intent during incidents; do not clear uncertain submissions or regenerate operation keys. Preserve immutable source/application/refund/debit/cash/ledger evidence and closed periods, and use compatible forward fixes. See `PHASE-4-OPERATIONS.md` and `FINANCIAL-SETTLEMENT-CONTRACT.md`. PDF/attachment/cashier containment and the live credential/runtime/operator actions below remain mandatory.
+
 ## Disclosed credentials and sessions
 
 Local Gitleaks 8.30.1 scanned available history with complete redaction. It reported

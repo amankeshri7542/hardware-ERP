@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Row, Col, Card, Statistic, Table, List, Tag, Typography, Spin, Badge, Space, Button,
+  Alert, Row, Col, Card, Statistic, Table, List, Tag, Typography, Spin, Badge, Space, Button,
 } from 'antd';
 import {
   DollarOutlined, WalletOutlined, ExclamationCircleOutlined, WarningOutlined,
@@ -35,6 +35,10 @@ export default function DashboardPage() {
   const intervalRef = useRef(null);
 
   const [summary, setSummary] = useState(null);
+  const [reconciliation, setReconciliation] = useState(false);
+  const [financialErrors, setFinancialErrors] = useState([]);
+  const [overdueAvailable, setOverdueAvailable] = useState(true);
+  const [modesAvailable, setModesAvailable] = useState(true);
   const [recentActivity, setRecentActivity] = useState([]);
   const [overdueInvoices, setOverdueInvoices] = useState([]);
   const [paymentModes, setPaymentModes] = useState([]);
@@ -53,20 +57,26 @@ export default function DashboardPage() {
         getPaymentModeBreakdown(),
       ]);
 
+      const flagged = value => value?.reconciliation_required === true || (Array.isArray(value) && value.some(row => row.reconciliation_required === true));
+      setReconciliation([summaryRes, overdueRes, modesRes].some(result => result.status === 'fulfilled' && flagged(result.value.data.data)));
+      setFinancialErrors([['Financial summary', summaryRes], ['Overdue invoices', overdueRes], ['Payment mode totals', modesRes]]
+        .filter(([, result]) => result.status === 'rejected')
+        .map(([label, result]) => `${label} unavailable${result.reason.response?.status ? ` (${result.reason.response.status}${result.reason.response.data?.code ? `: ${result.reason.response.data.code}` : ''})` : ''}.`));
+      setOverdueAvailable(overdueRes.status === 'fulfilled'); setModesAvailable(modesRes.status === 'fulfilled');
       if (summaryRes.status === 'fulfilled') {
         setSummary(summaryRes.value.data.data);
-      }
+      } else setSummary(null);
       if (activityRes.status === 'fulfilled') {
         setRecentActivity(activityRes.value.data.data || []);
       }
       if (overdueRes.status === 'fulfilled') {
         const od = overdueRes.value.data.data;
         setOverdueInvoices(Array.isArray(od) ? od : od?.invoices || []);
-      }
+      } else setOverdueInvoices([]);
       if (modesRes.status === 'fulfilled') {
         const md = modesRes.value.data.data;
         setPaymentModes(Array.isArray(md) ? md : md?.modes || []);
-      }
+      } else setPaymentModes([]);
     } catch {
       // Errors handled per-request via allSettled
     } finally {
@@ -198,8 +208,10 @@ export default function DashboardPage() {
         </Col>
       </Row>
 
+      {reconciliation && <Alert type="warning" showIcon message="Financial totals are incomplete or unverified" description="Some historical balances or money evidence require reconciliation and may be excluded. Zero totals and empty overdue lists do not confirm that nothing is owed." style={{ marginBottom: 16 }} />}
+      {financialErrors.length > 0 && <Alert type="error" showIcon message="Some financial sections are unavailable" description={financialErrors.join(' ')} style={{ marginBottom: 16 }} />}
       {/* Row 1 — Summary Cards */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+      {summary && <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         {summaryCards.map((card) => (
           <Col xs={24} sm={12} lg={8} xl={6} key={card.title}>
             <Card
@@ -227,14 +239,14 @@ export default function DashboardPage() {
             </Card>
           </Col>
         ))}
-      </Row>
+      </Row>}
 
       {/* Row 2 — Recent Activity + Payment Mode Breakdown */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         {/* Left: Recent Activity */}
         <Col xs={24} lg={14}>
           <Card
-            title="Recent Activity"
+            title="Recent issued invoices and original receipts"
             bordered={false}
             style={{ borderRadius: 8, height: '100%' }}
             extra={
@@ -253,20 +265,20 @@ export default function DashboardPage() {
                 >
                   <List.Item.Meta
                     avatar={
-                      <span style={{ fontSize: 20, color: item.type === 'payment' ? '#52c41a' : '#1890ff' }}>
-                        {item.type === 'payment' ? <DollarOutlined /> : <FileTextOutlined />}
+                      <span style={{ fontSize: 20, color: (item.activity_type || item.type) === 'payment' ? '#52c41a' : '#1890ff' }}>
+                        {(item.activity_type || item.type) === 'payment' ? <DollarOutlined /> : <FileTextOutlined />}
                       </span>
                     }
                     title={
                       <Space>
-                        <Text strong>{item.reference_no || item.invoice_no || '—'}</Text>
-                        <Tag color={item.type === 'payment' ? 'green' : 'blue'}>
-                          {item.type === 'payment' ? 'Payment' : 'Invoice'}
+                        <Text strong>{item.reference || item.reference_no || item.invoice_no || '—'}</Text>
+                        <Tag color={(item.activity_type || item.type) === 'payment' ? 'green' : 'blue'}>
+                          {(item.activity_type || item.type) === 'payment' ? 'Payment' : 'Invoice'}
                         </Tag>
                       </Space>
                     }
                     description={
-                      <Text type="secondary">{item.customer_name || 'Walk-in'}</Text>
+                      <Text type="secondary">{item.customer_name || 'Unknown issued identity'}</Text>
                     }
                   />
                   <div style={{ textAlign: 'right' }}>
@@ -288,7 +300,7 @@ export default function DashboardPage() {
             style={{ borderRadius: 8, height: '100%' }}
             extra={<Text type="secondary">This Month</Text>}
           >
-            {paymentModes.length === 0 ? (
+            {!modesAvailable ? <Text type="danger">Payment mode totals unavailable</Text> : paymentModes.length === 0 ? (
               <Text type="secondary">No payment data for this month</Text>
             ) : (
               <Space direction="vertical" size="large" style={{ width: '100%' }}>
@@ -311,7 +323,7 @@ export default function DashboardPage() {
                     <Col>
                       <Text strong style={{ fontSize: 16 }}>{formatINR(pm.total || 0)}</Text>
                       <Text type="secondary" style={{ marginLeft: 8 }}>
-                        ({pm.count || 0} txns)
+                        ({pm.count || 0} incoming tender portions)
                       </Text>
                     </Col>
                   </Row>
@@ -365,7 +377,7 @@ export default function DashboardPage() {
           rowKey={(record) => record.id || record.invoice_no}
           pagination={false}
           size="small"
-          locale={{ emptyText: 'No overdue invoices' }}
+          locale={{ emptyText: overdueAvailable ? 'No overdue invoices' : 'Overdue invoices unavailable' }}
         />
       </Card>
     </div>

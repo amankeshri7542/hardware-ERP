@@ -46,8 +46,9 @@ const getStockMovementReport = asyncHandler(async (req, res) => {
 });
 
 const getCustomerDuesReport = asyncHandler(async (req, res) => {
-  const { overdueOnly, customerType, page, limit } = req.query;
+  const { overdueOnly, customerType, as_of, page, limit } = req.query;
   const data = await reportsService.getCustomerDuesReport({
+    as_of,
     overdueOnly: overdueOnly === 'true',
     customerType: customerType || null,
     page: Math.max(1, parseInt(page, 10) || 1),

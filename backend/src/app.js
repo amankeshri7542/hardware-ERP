@@ -91,6 +91,8 @@ app.use('/api/reports', exportsRouter);
 const settingsRouter = require('./modules/settings/settings.router');
 app.use('/api/settings', settingsRouter);
 
+app.use('/api/finance', require('./modules/settlements/settlements.router'));
+
 // Serve Frontend in Production (fallback if nginx is not used)
 // When nginx handles static files, this block is harmless but provides a safety net.
 if (process.env.NODE_ENV === 'production') {

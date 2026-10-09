@@ -12,7 +12,6 @@ import dayjs from 'dayjs';
 import { getCustomer, getCustomerLedger, getCustomerSummary } from '../../api/customers.api';
 import { formatINR, formatDate } from '../../utils/formatCurrency';
 import CustomerFormModal from './CustomerFormModal';
-import PaymentModal from '../../components/PaymentModal/PaymentModal';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -42,7 +41,6 @@ export default function CustomerDetailPage() {
     dayjs(),
   ]);
   const [modalOpen, setModalOpen] = useState(false);
-  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
 
   const fetchCustomer = useCallback(async () => {
     setLoading(true);
@@ -128,10 +126,11 @@ export default function CustomerDetailPage() {
       },
     },
     {
-      title: 'Balance', dataIndex: 'running_balance', key: 'running_balance', width: 130,
+      title: 'Balance at posting', dataIndex: 'balance', key: 'balance', width: 130,
       align: 'right',
       render: (v) => {
-        const amount = Number(v) || 0;
+        const amount = typeof v === 'number' || (typeof v === 'string' && v.trim()) ? Number(v) : NaN;
+        if (!Number.isFinite(amount)) return '—';
         return (
           <span style={{ fontWeight: 600, color: amount > 0 ? '#ff4d4f' : '#52c41a' }}>
             {formatINR(amount)}
@@ -148,9 +147,9 @@ export default function CustomerDetailPage() {
     return <div style={{ padding: 48 }}>Customer not found</div>;
   }
 
-  const outstandingBalance = Number(customer.outstanding_balance) || 0;
+  const netAccountBalance = Number(customer.outstanding_balance) || 0;
   const creditLimit = Number(customer.credit_limit) || 0;
-  const availableCredit = creditLimit - outstandingBalance;
+  const unusedCreditLimit = creditLimit - netAccountBalance;
 
   return (
     <div style={{ padding: 24 }}>
@@ -161,6 +160,7 @@ export default function CustomerDetailPage() {
         ]}
       />
 
+      <Link to={`/settlements/customer/${id}`} style={{ display: 'inline-block', marginBottom: 16 }}>Open customer settlements and statement</Link>
       <Row gutter={24}>
         {/* Left Panel — 65% */}
         <Col xs={24} lg={16}>
@@ -226,16 +226,17 @@ export default function CustomerDetailPage() {
                     formatter={(val) => formatINR(val)} />
                 </Col>
                 <Col span={8}>
-                  <Statistic title="Outstanding Balance" value={outstandingBalance}
-                    valueStyle={{ color: outstandingBalance > 0 ? '#ff4d4f' : '#52c41a' }}
+                  <Statistic title="Net Account Balance" value={netAccountBalance}
+                    valueStyle={{ color: netAccountBalance > 0 ? '#ff4d4f' : '#52c41a' }}
                     formatter={(val) => formatINR(val)} />
                 </Col>
                 <Col span={8}>
-                  <Statistic title="Available Credit" value={availableCredit}
-                    valueStyle={{ color: availableCredit >= 0 ? '#52c41a' : '#ff4d4f' }}
+                  <Statistic title="Unused Credit Limit" value={unusedCreditLimit}
+                    valueStyle={{ color: unusedCreditLimit >= 0 ? '#52c41a' : '#ff4d4f' }}
                     formatter={(val) => formatINR(val)} />
                 </Col>
               </Row>
+              <Text type="secondary">Net account balance includes credits. Open settlements for invoice dues and available advances or return credits.</Text>
             </div>
           </Card>
         </Col>
@@ -273,12 +274,9 @@ export default function CustomerDetailPage() {
                 block
                 type="primary"
                 icon={<DollarOutlined />}
-                disabled={outstandingBalance <= 0}
-                onClick={() => setPaymentModalOpen(true)}
+                onClick={() => navigate(`/settlements/customer/${id}`)}
               >
-                {outstandingBalance > 0
-                  ? `Receive Payment (${formatINR(outstandingBalance)} due)`
-                  : 'No Dues Outstanding'}
+                Record advance or allocate credit
               </Button>
               <Button block icon={<FileTextOutlined />}
                 onClick={() => navigate(`/invoices?customer_id=${id}`)}>
@@ -297,7 +295,8 @@ export default function CustomerDetailPage() {
       </Row>
 
       {/* Ledger Section — full width */}
-      <Card id="customer-ledger" title="Customer Ledger" style={{ marginTop: 24 }}>
+      <Card id="customer-ledger" title="Original Customer Ledger" style={{ marginTop: 24 }}>
+        <p><Text type="secondary">Balances are stored at posting. </Text><Link to={`/settlements/customer/${id}`}>Open the current statement for running and as-of balances.</Link></p>
         <Space style={{ marginBottom: 16 }}>
           <RangePicker
             value={dateRange}
@@ -332,21 +331,6 @@ export default function CustomerDetailPage() {
         customer={customer}
       />
 
-      {/* Payment Modal — for receiving overdue payments directly from the Customer page */}
-      <PaymentModal
-        open={paymentModalOpen}
-        onClose={() => setPaymentModalOpen(false)}
-        customerId={customer?.id || null}
-        invoiceId={null}
-        balanceDue={outstandingBalance}
-        onSuccess={() => {
-          setPaymentModalOpen(false);
-          fetchCustomer();
-          fetchSummary();
-          fetchLedger();
-          message.success('Payment recorded. Ledger updated.');
-        }}
-      />
     </div>
   );
 }

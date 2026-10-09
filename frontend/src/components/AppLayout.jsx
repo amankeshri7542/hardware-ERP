@@ -11,6 +11,7 @@ import {
   TruckOutlined,
   BarChartOutlined,
   SettingOutlined,
+  WalletOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -30,6 +31,7 @@ const menuItems = [
   { key: '/products', icon: <AppstoreOutlined />, label: 'Products' },
   { key: '/purchases', icon: <ShoppingOutlined />, label: 'Purchases' },
   { key: '/suppliers', icon: <TruckOutlined />, label: 'Suppliers' },
+  { key: '/settlements', icon: <WalletOutlined />, label: 'Settlements' },
   { key: '/reports', icon: <BarChartOutlined />, label: 'Reports' },
   { key: '/settings', icon: <SettingOutlined />, label: 'Settings' },
 ];

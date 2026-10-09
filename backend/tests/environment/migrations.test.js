@@ -104,12 +104,21 @@ test('actual historical schema upgrade preserves invoices and append-only ledger
       const expected = table === 'invoices' ? rows.map(row => ({ ...row, notes: null })) : rows;
       assert.deepEqual((await client.query(`SELECT * FROM ${table} ORDER BY id`)).rows, expected);
     }
-    assert.deepEqual(await runMigrations(client), ['015']);
+    assert.deepEqual(await runMigrations(client, { through: '015' }), ['015']);
     for (const [table, rows] of Object.entries(snapshots)) {
       const expected = table === 'invoices' ? rows.map(row => ({ ...row, notes: null }))
         : table === 'invoice_items' ? rows.map(row => ({ ...row, base_unit_snapshot: null })) : rows;
       assert.deepEqual((await client.query(`SELECT * FROM ${table} ORDER BY id`)).rows, expected);
     }
+    const through15={};
+    for(const table of Object.keys(snapshots)) through15[table]=(await client.query(`SELECT * FROM ${table} ORDER BY id`)).rows;
+    assert.deepEqual(await runMigrations(client), ['016','017','018','019','020','021']);
+    for(const [table,rows] of Object.entries(through15)) {
+      const current=(await client.query(`SELECT * FROM ${table} ORDER BY id`)).rows;
+      assert.deepEqual(current.map(row=>Object.fromEntries(Object.keys(rows[0]||{}).map(key=>[key,row[key]]))),rows,'Historical columns remain unchanged in '+table);
+    }
+    assert.deepEqual((await client.query('SELECT document_kind,contract_version,original_invoice_id FROM invoices')).rows,
+      [{document_kind:null,contract_version:null,original_invoice_id:null}]);
     await assert.rejects(client.query('UPDATE customer_ledger SET debit=0'), /append.only/i);
     await assert.rejects(client.query('DELETE FROM stock_ledger'), /append.only/i);
     await assert.rejects(client.query('UPDATE products SET current_stock=-1'), /negative|insufficient/i);

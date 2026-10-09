@@ -11,8 +11,10 @@
     "test:browser": "node ../scripts/run-local-tests.cjs --test tests/browser.test.js",
     "test:auth": "node ../scripts/run-local-tests.cjs --test tests/auth.test.js",
     "lint": "eslint src",
-    "test:financial": "node ../scripts/run-local-tests.cjs --test tests/financial.test.js",
-    "test:financial-browser": "node ../scripts/run-local-tests.cjs --test tests/financial-browser.test.js"
+    "test:financial": "node ../scripts/run-local-tests.cjs --test tests/financial.test.js tests/phase3.test.js tests/phase4.test.js",
+    "test:financial-browser": "node ../scripts/run-local-tests.cjs --test tests/financial-browser.test.js",
+    "test:phase3-browser": "node ../scripts/run-local-tests.cjs --test tests/phase3-browser.test.js",
+    "test:phase4-browser": "node ../scripts/run-local-tests.cjs --test tests/phase4-browser.test.js"
   },
   "dependencies": {
     "react": "^18.2.0",

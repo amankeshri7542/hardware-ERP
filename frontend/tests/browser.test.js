@@ -68,7 +68,9 @@ async function login(t, role = 'admin') {
     blockedOrigins.add('websocket');
     socket.close();
   });
-  await context.route('**/*', async route => {
+  const guardedRequests = new Set();
+  await context.route('**/*', route => {
+    const pending = (async () => {
     const destination = new URL(route.request().url());
     if (destination.protocol === 'data:' || (destination.protocol === 'blob:' && destination.origin === origin)) return route.continue();
     if (destination.origin !== origin) {
@@ -82,9 +84,12 @@ async function login(t, role = 'admin') {
       return route.abort('blockedbyclient');
     }
     return route.fulfill({ response });
+    })();
+    guardedRequests.add(pending);
+    return pending.finally(() => guardedRequests.delete(pending));
   });
   t.after(() => assert.equal(blockedOrigins.size, 0, 'The built frontend must never request a nonlocal origin'));
-  t.after(() => context.close());
+  t.after(async () => { while (guardedRequests.size) await Promise.all([...guardedRequests]); await context.close(); });
   const page = await context.newPage();
   page.setDefaultTimeout(10000);
   page.on('pageerror', error => console.error('Browser runtime error:', error.message));
@@ -96,6 +101,7 @@ async function login(t, role = 'admin') {
   const response = await loginResponse;
   assert.equal(response.status(), 200, `Browser login failed: ${(await response.json()).code || 'HTTP error'}`);
   await page.waitForURL(`${origin}${role === 'admin' ? '/dashboard' : '/products'}`);
+  if(role === 'admin') await expect(page.getByRole('heading',{name:'Dashboard',exact:true})).toBeVisible();
   return { context, page };
 }
 
@@ -157,7 +163,7 @@ test('cashier sees a working redacted catalog and cannot navigate into billing',
 test('disabled documents are explicit and account disablement invalidates browser navigation', async t => {
   const { page } = await login(t);
   await page.goto(`${origin}/purchases/new`);
-  await expect(page.getByText('Attachments are temporarily unavailable while safety checks are completed. You can save the purchase without a file.')).toBeVisible();
+  await expect(page.getByText('Supplier attachments remain unavailable. Save the purchase without a file.')).toBeVisible();
   await expect(page.locator('input[type="file"]')).toHaveCount(0);
   await page.goto(`${origin}/reports/sales`);
   await expect(page.getByRole('button', { name: /PDF unavailable$/ })).toBeDisabled();

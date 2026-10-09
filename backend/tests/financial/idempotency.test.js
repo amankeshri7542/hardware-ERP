@@ -6,6 +6,7 @@ const bcrypt = require('bcrypt');
 const { app, request, ownerPool: owner, origin, setupActor, post, fixtureCustomer, close } = require('../helpers/financial');
 const { withIdempotency } = require('../../src/utils/idempotency');
 const { normalizePaymentIntent, postPayment } = require('../../src/modules/payments/paymentPosting');
+const { lockWaiters } = require('../helpers/lockWaiters');
 
 let actor;
 let secondAdmin;
@@ -46,10 +47,11 @@ test('eight concurrent same-key requests wait for one durable receipt and return
   try {
     await blocker.query('BEGIN');
     await blocker.query('SELECT id FROM customers WHERE id=$1 FOR UPDATE', [customer.id]);
+    const blockerPid = (await blocker.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
     requests = Array.from({ length: 8 }, () => post('/payments', advance(customer), { actor, key }));
     let waiting = 0;
     for (let attempt = 0; attempt < 100; attempt++) {
-      waiting = (await owner.query("SELECT COUNT(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND usename=$1 AND wait_event_type='Lock'", [process.env.TEST_APP_DB_USER])).rows[0].n;
+      waiting = await lockWaiters(owner, blockerPid);
       if (waiting >= 8) break;
       await new Promise(resolve => setTimeout(resolve, 20));
     }
@@ -59,7 +61,7 @@ test('eight concurrent same-key requests wait for one durable receipt and return
     blocker.release();
   }
   const results = await Promise.all(requests);
-  assert.ok(results.every(result => result.status === 201));
+  assert.ok(results.every(result => result.status === 201), JSON.stringify(results.map(result => ({status:result.status,body:result.body}))));
   for (const result of results) assert.deepEqual(result.body, results[0].body);
   assert.deepEqual(await effects(customer), { payments: 1, details: 1, ledger: 1, outstanding_balance: '-10.00' });
   assert.equal(await reservationCount(key), 1);

@@ -53,8 +53,8 @@ async function updateSupplier(req, res, next) {
 
 async function createPurchase(req, res, next) {
   try {
-    const result = await purchasesService.createPurchaseWithStockIn(req.body, req.user.id);
-    return res.status(201).json({ success: true, data: result });
+    const result = await purchasesService.createPurchaseWithStockIn(req.body, req.user.id, req.get('Idempotency-Key'));
+    return res.status(result.status).json(result.body);
   } catch (err) {
     next(err);
   }
@@ -143,9 +143,9 @@ async function getSupplierDebitNotes(req, res, next) {
 async function createPurchaseReturn(req, res, next) {
   try {
     const result = await purchasesService.createPurchaseReturn(
-      req.params.id, req.body, req.user.id
+      req.params.id, req.body, req.user.id, req.get('Idempotency-Key')
     );
-    return res.status(201).json({ success: true, data: result });
+    return res.status(result.status).json(result.body);
   } catch (err) {
     next(err);
   }
@@ -175,6 +175,14 @@ async function uploadInvoiceFile(req, res, next) {
 }
 
 const getInvoiceFileUrl = uploadInvoiceFile;
+async function quotePurchase(req, res, next) {
+  try { res.json({ success: true, data: await purchasesService.quotePurchase(req.body) }); }
+  catch (error) { next(error); }
+}
+async function quotePurchaseReturn(req, res, next) {
+  try { res.json({ success: true, data: await purchasesService.quotePurchaseReturn(req.params.id, req.body) }); }
+  catch (error) { next(error); }
+}
 
 module.exports = {
   createSupplier,
@@ -182,12 +190,14 @@ module.exports = {
   getSupplier,
   updateSupplier,
   createPurchase,
+  quotePurchase,
   listPurchases,
   getPurchase,
   updatePurchaseNotes,
   getSupplierProducts,
   getSupplierDebitNotes,
   createPurchaseReturn,
+  quotePurchaseReturn,
   getPurchaseReturns,
   uploadInvoiceFile,
   getInvoiceFileUrl,

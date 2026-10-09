@@ -4,10 +4,9 @@ const { randomUUID } = require('node:crypto');
 
 const { pool, setupActor, post: guardedPost, fixtureProduct, fixtureCustomer, close } = require('../helpers/financial');
 let actor;
-let userId;
 let sequence = 0;
 const run = randomUUID();
-before(async () => { actor = await setupActor(); userId = actor.id; });
+before(async () => { actor = await setupActor(); });
 after(close);
 async function fixture() {
   sequence++;
@@ -81,8 +80,10 @@ test('FIN-06: duplicate sales-return lines cannot exceed the original quantity',
   const f = await fixture();
   const id = await issue(f);
   const item = await originalItem(id);
-  const response = await post(`/invoices/${id}/return`, { items: [item, item] });
+  // New contract fields preserve the original duplicate-line financial assertion.
+  const response = await post(`/invoices/${id}/return`, { return_date: '2026-01-16', reason: 'Synthetic return', disposition: 'sellable', items: [item, item] });
   assert.equal(response.status, 422, 'Two duplicate full returns must be rejected atomically');
+  assert.equal(response.body.code, 'DUPLICATE_RETURN_ITEM');
   assert.equal(await stock(f.product.id), 98);
 });
 
@@ -90,19 +91,39 @@ test('FIN-07: a sales return must bind the product to its original invoice item'
   const f = await fixture();
   const id = await issue(f);
   const item = { ...await originalItem(id), product_id: f.unrelated.id };
-  const response = await post(`/invoices/${id}/return`, { items: [item] });
+  const response = await post(`/invoices/${id}/return`, { return_date: '2026-01-16', reason: 'Synthetic return', disposition: 'sellable', items: [item] });
   assert.equal(response.status, 422, 'A valid item ID cannot authorize returning another product');
+  assert.equal(response.body.code, 'RETURN_PRODUCT_MISMATCH');
   assert.equal(await stock(f.unrelated.id), 100);
 });
 
 test('FIN-08: purchase returns must bind quantity and product to the purchase', async () => {
   const f = await fixture();
   const { rows: suppliers } = await pool.query('INSERT INTO suppliers(name) VALUES($1) RETURNING id', [`supplier-${run}-${sequence}`]);
-  const { rows: purchases } = await pool.query('INSERT INTO purchases(supplier_id,date,total_amount,created_by) VALUES($1,$2,60,$3) RETURNING id', [suppliers[0].id, '2026-01-15', userId]);
-  await pool.query("INSERT INTO purchase_items(purchase_id,product_id,qty,unit,cost_price,line_total) VALUES($1,$2,2,'piece',30,60)", [purchases[0].id, f.product.id]);
-  const response = await post(`/purchases/${purchases[0].id}/returns`, { items: [{ product_id: f.unrelated.id, qty_returned: 1, cost_price: 999 }] });
+  // Issue a provable source receipt; missing provenance is not proof of FIN-08.
+  const issued = await post('/purchases', {supplier_id:suppliers[0].id,date:'2026-01-15',
+    items:[{product_id:f.product.id,qty:2,unit:'piece',cost_price:30}]});
+  assert.equal(issued.status,201,JSON.stringify(issued.body));
+  const purchaseId=issued.body.data.purchase.id;
+  const {rows:[line]}=await pool.query('SELECT id FROM purchase_items WHERE purchase_id=$1',[purchaseId]);
+  const path=`/purchases/${purchaseId}/returns`;
+  const body={return_date:'2026-01-16',reason:'Synthetic supplier return',items:[{purchase_item_id:line.id,product_id:f.unrelated.id,qty_returned:1,cost_price:999}]};
+  const missing=await post(path,{...body,items:[{product_id:f.unrelated.id,qty_returned:1,cost_price:999}]});
+  assert.equal(missing.status,422);
+  const response = await post(path,body);
   assert.equal(response.status, 422, 'An unrelated product with a client-chosen price must not create a supplier debit');
+  assert.equal(response.body.code,'PURCHASE_RETURN_PRODUCT_MISMATCH');
+  body.items[0].product_id=f.product.id;
+  const forgedCost=await post(path,body);
+  assert.equal(forgedCost.status,422);
+  assert.equal(forgedCost.body.code,'PURCHASE_RETURN_VALUE_MISMATCH');
   assert.equal(await stock(f.unrelated.id), 100);
+  assert.equal(await stock(f.product.id),102);
+  assert.equal((await pool.query('SELECT COUNT(*)::integer AS n FROM purchase_returns WHERE purchase_id=$1',[purchaseId])).rows[0].n,0);
+  body.items[0].cost_price=30;
+  const valid=await post(path,body);
+  assert.equal(valid.status,201,JSON.stringify(valid.body));
+  assert.equal(await stock(f.product.id),101);
 });
 
 test('FIN-09: repeating an idempotency key creates exactly one invoice', async () => {

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Row, Col, Card, Statistic, Table, Button, DatePicker, Select, Space, Tag, message } from 'antd';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Alert, Row, Col, Card, Statistic, Table, Button, DatePicker, Select, Space, Tag, message } from 'antd';
 import { DownloadOutlined, FilePdfOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import ReportLayout from '../../components/Reports/ReportLayout';
@@ -15,7 +15,6 @@ const MODE_OPTIONS = [
   { label: 'UPI', value: 'upi' },
   { label: 'Bank', value: 'bank' },
   { label: 'Cheque', value: 'cheque' },
-  { label: 'Mixed', value: 'mixed' },
 ];
 
 const MODE_COLORS = {
@@ -29,6 +28,10 @@ const MODE_COLORS = {
 export default function CollectionsReportPage() {
   const [dateRange, setDateRange] = useState([dayjs().startOf('month'), dayjs()]);
   const [paymentMode, setPaymentMode] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const generation = useRef(0);
+  const [reconciliation, setReconciliation] = useState(false);
   const [data, setData] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -36,27 +39,32 @@ export default function CollectionsReportPage() {
   const [exportingPdf, setExportingPdf] = useState(false);
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
+    const request = ++generation.current; setLoading(true); setData([]); setSummary(null);
     try {
       const params = {
         from: dateRange[0].format('YYYY-MM-DD'),
         to: dateRange[1].format('YYYY-MM-DD'),
       };
       if (paymentMode) params.mode = paymentMode;
+      Object.assign(params, { page, limit: 50 });
 
       const res = await getCollectionsReport(params);
+      if (request !== generation.current) return;
       const result = res.data.data;
+      setReconciliation(result.reconciliation_required === true);
+      setTotal(result.pagination?.total || 0);
       setData(result.payments || []);
       setSummary(result.summary || null);
     } catch {
-      message.error('Failed to load collections report');
+      if (request === generation.current) message.error('Failed to load collections report');
     } finally {
-      setLoading(false);
+      if (request === generation.current) setLoading(false);
     }
-  }, [dateRange, paymentMode]);
+  }, [dateRange, paymentMode, page]);
 
   useEffect(() => {
     fetchData();
+    return () => { generation.current++; };
   }, [fetchData]);
 
   const handleExport = async () => {
@@ -94,6 +102,9 @@ export default function CollectionsReportPage() {
   };
 
   const columns = [
+    { title: 'Direction', dataIndex: 'direction', render: value => value === 'in' ? 'Received' : 'Paid out' },
+    { title: 'Event', dataIndex: 'kind' },
+    { title: 'Source', key: 'source', render: (_, row) => `${row.source_type} #${row.source_id}` },
     {
       title: 'Payment Ref',
       dataIndex: 'reference_no',
@@ -106,11 +117,11 @@ export default function CollectionsReportPage() {
       render: (val) => formatDate(val),
     },
     {
-      title: 'Customer',
+      title: 'Issued party',
       dataIndex: 'customer_name',
       key: 'customer_name',
       ellipsis: true,
-      render: (val) => val || 'Walk-in',
+      render: (val, row) => val || row.party_snapshot?.name || 'Unknown issued identity',
     },
     {
       title: 'Invoice No',
@@ -148,9 +159,11 @@ export default function CollectionsReportPage() {
     <Row gutter={[16, 16]}>
       <Col xs={12} sm={8} lg={4}>
         <Card size="small" bordered={false} style={{ background: '#e6f7ff' }}>
-          <Statistic title="Total Collections" value={summary.total_collected || 0} formatter={(val) => formatINR(val)} />
+          <Statistic title="Money received" value={summary.total_collected || 0} formatter={(val) => formatINR(val)} />
         </Card>
       </Col>
+      <Col xs={12} sm={8} lg={4}><Card size="small" bordered={false}><Statistic title="Money paid out" value={summary.total_refunded || 0} formatter={formatINR} /></Card></Col>
+      <Col xs={12} sm={8} lg={4}><Card size="small" bordered={false}><Statistic title="Net money movement" value={summary.net_collected || 0} formatter={formatINR} /></Card></Col>
       <Col xs={12} sm={8} lg={4}>
         <Card size="small" bordered={false} style={{ background: '#f6ffed' }}>
           <Statistic title="Total Transactions" value={summary.total_payments || 0} />
@@ -158,22 +171,22 @@ export default function CollectionsReportPage() {
       </Col>
       <Col xs={12} sm={8} lg={4}>
         <Card size="small" bordered={false} style={{ background: '#f6ffed' }}>
-          <Statistic title="Cash" value={summary.cash_total || 0} formatter={(val) => formatINR(val)} />
+          <Statistic title="Cash net" value={summary.cash_total || 0} formatter={(val) => formatINR(val)} />
         </Card>
       </Col>
       <Col xs={12} sm={8} lg={4}>
         <Card size="small" bordered={false} style={{ background: '#e6f7ff' }}>
-          <Statistic title="UPI" value={summary.upi_total || 0} formatter={(val) => formatINR(val)} />
+          <Statistic title="UPI net" value={summary.upi_total || 0} formatter={(val) => formatINR(val)} />
         </Card>
       </Col>
       <Col xs={12} sm={8} lg={4}>
         <Card size="small" bordered={false} style={{ background: '#f9f0ff' }}>
-          <Statistic title="Bank" value={summary.bank_total || 0} formatter={(val) => formatINR(val)} />
+          <Statistic title="Bank net" value={summary.bank_total || 0} formatter={(val) => formatINR(val)} />
         </Card>
       </Col>
       <Col xs={12} sm={8} lg={4}>
         <Card size="small" bordered={false} style={{ background: '#fff7e6' }}>
-          <Statistic title="Cheque" value={summary.cheque_total || 0} formatter={(val) => formatINR(val)} />
+          <Statistic title="Cheque net" value={summary.cheque_total || 0} formatter={(val) => formatINR(val)} />
         </Card>
       </Col>
     </Row>
@@ -183,13 +196,13 @@ export default function CollectionsReportPage() {
     <Space wrap>
       <RangePicker
         value={dateRange}
-        onChange={(dates) => dates && setDateRange(dates)}
+        onChange={(dates) => { if (dates) { setPage(1); setDateRange(dates); } }}
         format="DD-MM-YYYY"
         allowClear={false}
       />
       <Select
         value={paymentMode}
-        onChange={setPaymentMode}
+        onChange={value => { setPage(1); setPaymentMode(value); }}
         style={{ width: 160 }}
         placeholder="Payment Mode"
       >
@@ -211,7 +224,7 @@ export default function CollectionsReportPage() {
           </>
         }
         filters={filters}
-        summary={summaryCards}
+        summary={<>{reconciliation && <Alert type="warning" showIcon message="Some issued identities are unknown. Money movements retain their original recorded evidence." />}{summaryCards}</>}
         loading={loading}
         table={
           <Table
@@ -220,7 +233,7 @@ export default function CollectionsReportPage() {
             rowKey={(record) => record.id || record.reference_no}
             size="small"
             scroll={{ x: 800 }}
-            pagination={{ pageSize: 50, showTotal: (total) => `Total ${total} payments` }}
+            pagination={{ current: page, pageSize: 50, total, showSizeChanger: false, onChange: setPage, showTotal: value => `Total ${value} tender portions` }}
           />
         }
       />

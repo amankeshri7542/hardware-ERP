@@ -49,11 +49,13 @@ jobs:
           npm ci --prefix backend
           npm ci --prefix frontend
       - name: Lint and syntax
+        env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
         run: |
           npm run lint --prefix backend
           npm run check:syntax --prefix backend
           npm run lint --prefix frontend
       - name: Fresh and repeat migrations
+        env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
         run: |
           node scripts/run-local-tests.cjs db/migrations/index.js
           node scripts/run-local-tests.cjs db/migrations/index.js
@@ -62,20 +64,25 @@ jobs:
         run: |
           psql -h 127.0.0.1 -U erp_migrator -d hardware_erp_test -v ON_ERROR_STOP=1 -c "CREATE ROLE erp_app LOGIN PASSWORD 'synthetic-ci-app-only' NOSUPERUSER NOCREATEDB NOCREATEROLE"
           psql -h 127.0.0.1 -U erp_migrator -d hardware_erp_test -v app_role=erp_app -f db/grants.sql
-      - name: Database, security, containment and Phase 2 financial regressions
+      - name: Database, security, containment and financial regressions
+        env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
         run: npm test --prefix backend
       - name: Frontend auth and build
+        env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs', VITE_API_URL: '/api'}
         run: |
           npm run test:auth --prefix frontend
           npm run test:financial --prefix frontend
           NODE_ENV=production npm run build --prefix frontend
-      - name: Real browser auth/navigation
-        env: {TRUST_PROXY: '127.0.0.1/32,::1/128'}
+      - name: Install browser test tooling
+        run: cd frontend && npx playwright install --with-deps chromium
+      - name: Real browser auth/navigation and Phase 4 settlement recovery
+        env: {TRUST_PROXY: '127.0.0.1/32,::1/128', NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
         run: |
           cd frontend
-          npx playwright install --with-deps chromium
           DB_USER=erp_app DB_PASSWORD=synthetic-ci-app-only FIXTURE_DB_USER=erp_migrator FIXTURE_DB_PASSWORD=synthetic-ci-owner-only npm run test:browser
           DB_USER=erp_app DB_PASSWORD=synthetic-ci-app-only FIXTURE_DB_USER=erp_migrator FIXTURE_DB_PASSWORD=synthetic-ci-owner-only npm run test:financial-browser
+          DB_USER=erp_app DB_PASSWORD=synthetic-ci-app-only FIXTURE_DB_USER=erp_migrator FIXTURE_DB_PASSWORD=synthetic-ci-owner-only npm run test:phase3-browser
+          DB_USER=erp_app DB_PASSWORD=synthetic-ci-app-only FIXTURE_DB_USER=erp_migrator FIXTURE_DB_PASSWORD=synthetic-ci-owner-only npm run test:phase4-browser
       - name: Real database TLS and nginx SPA headers
         run: |
           sudo apt-get update
@@ -145,7 +152,8 @@ jobs:
         run: |
           psql -h 127.0.0.1 -U erp_migrator -d hardware_erp_test -v ON_ERROR_STOP=1 -c "CREATE ROLE erp_app LOGIN PASSWORD 'synthetic-ci-app-only' NOSUPERUSER NOCREATEDB NOCREATEROLE"
           psql -h 127.0.0.1 -U erp_migrator -d hardware_erp_test -v ON_ERROR_STOP=1 -v app_role=erp_app -f db/grants.sql
-      - name: Original financial invariants (returns remain blocked until Phase 3)
+      - name: Original financial invariants (all required)
+        env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
         run: npm run test:release-blockers --prefix backend
       - name: Historical credential release gate
         if: always()

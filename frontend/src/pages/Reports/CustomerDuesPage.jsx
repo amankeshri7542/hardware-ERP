@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Row, Col, Card, Statistic, Table, Button, Select, Switch, Space, message } from 'antd';
+import { Alert, Row, Col, Card, Statistic, Table, Button, Select, Switch, Space, message } from 'antd';
 import { DownloadOutlined, FilePdfOutlined } from '@ant-design/icons';
 import ReportLayout from '../../components/Reports/ReportLayout';
 import { getCustomerDuesReport, exportReport, exportReportPdf } from '../../api/reports.api';
@@ -19,6 +19,10 @@ export default function CustomerDuesPage() {
 
   const [customerType, setCustomerType] = useState('');
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [reconciliation, setReconciliation] = useState(false);
+  const generation = useRef(0);
   const [data, setData] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -26,33 +30,36 @@ export default function CustomerDuesPage() {
   const [exportingPdf, setExportingPdf] = useState(false);
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
+    const request = ++generation.current; setLoading(true); setData([]); setSummary(null);
     try {
-      const params = {};
-      if (customerType) params.type = customerType;
-      if (overdueOnly) params.overdue = true;
+      const params = { page, limit: 50 };
+      if (customerType) params.customerType = customerType;
+      if (overdueOnly) params.overdueOnly = true;
 
       const res = await getCustomerDuesReport(params);
+      if (request !== generation.current) return;
       const result = res.data.data;
+      setTotal(result.pagination?.total || 0); setReconciliation(result.reconciliation_required === true);
       setData(result.customers || []);
       setSummary(result.summary || null);
     } catch {
-      message.error('Failed to load customer dues report');
+      if (request === generation.current) message.error('Failed to load customer dues report');
     } finally {
-      setLoading(false);
+      if (request === generation.current) setLoading(false);
     }
-  }, [customerType, overdueOnly]);
+  }, [customerType, overdueOnly, page]);
 
   useEffect(() => {
     fetchData();
+    return () => { generation.current++; };
   }, [fetchData]);
 
   const handleExport = async () => {
     setExporting(true);
     try {
       const params = {};
-      if (customerType) params.type = customerType;
-      if (overdueOnly) params.overdue = true;
+      if (customerType) params.customerType = customerType;
+      if (overdueOnly) params.overdueOnly = true;
       await exportReport('customer-dues', params);
       message.success('Customer dues report exported');
     } catch {
@@ -66,8 +73,8 @@ export default function CustomerDuesPage() {
     setExportingPdf(true);
     try {
       const params = {};
-      if (customerType) params.type = customerType;
-      if (overdueOnly) params.overdue = true;
+      if (customerType) params.customerType = customerType;
+      if (overdueOnly) params.overdueOnly = true;
       await exportReportPdf('customer-dues', params);
       message.success('Customer dues PDF exported');
     } catch {
@@ -86,6 +93,8 @@ export default function CustomerDuesPage() {
   };
 
   const columns = [
+    { title: 'Available customer funds', dataIndex: 'available_credit', render: value => value == null ? '—' : formatINR(value) },
+    { title: 'Overdue amount', dataIndex: 'overdue_amount', render: value => value == null ? '—' : formatINR(value) },
     {
       title: 'Customer Name',
       dataIndex: 'name',
@@ -109,13 +118,11 @@ export default function CustomerDuesPage() {
       render: (val) => val?.toUpperCase() || '\u2014',
     },
     {
-      title: 'Outstanding',
+      title: 'Invoice due',
       dataIndex: 'outstanding_balance',
       key: 'outstanding_balance',
       align: 'right',
       render: (val) => formatINR(val),
-      sorter: (a, b) => (a.outstanding_balance || 0) - (b.outstanding_balance || 0),
-      defaultSortOrder: 'descend',
     },
     {
       title: 'Unpaid Invoices',
@@ -141,14 +148,14 @@ export default function CustomerDuesPage() {
     <Row gutter={[16, 16]}>
       <Col xs={12} sm={8} lg={6}>
         <Card size="small" bordered={false} style={{ background: '#e6f7ff' }}>
-          <Statistic title="Total Customers" value={summary.total_customers || 0} />
+          <Statistic title="Total Customers" value={summary.count || 0} />
         </Card>
       </Col>
       <Col xs={12} sm={8} lg={6}>
         <Card size="small" bordered={false} style={{ background: '#fff2f0' }}>
           <Statistic
-            title="Total Outstanding"
-            value={summary.total_outstanding || 0}
+            title="Invoice due"
+            value={summary.total_due || 0}
             formatter={(val) => formatINR(val)}
             valueStyle={{ color: '#ff4d4f' }}
           />
@@ -156,14 +163,14 @@ export default function CustomerDuesPage() {
       </Col>
       <Col xs={12} sm={8} lg={6}>
         <Card size="small" bordered={false} style={{ background: '#fff7e6' }}>
-          <Statistic title="Overdue Customers" value={summary.overdue_customers || 0} valueStyle={{ color: '#fa8c16' }} />
+          <Statistic title="Overdue amount" value={summary.overdue || 0} formatter={formatINR} valueStyle={{ color: '#fa8c16' }} />
         </Card>
       </Col>
       <Col xs={12} sm={8} lg={6}>
         <Card size="small" bordered={false} style={{ background: '#f6ffed' }}>
           <Statistic
-            title="Avg Outstanding"
-            value={summary.avg_outstanding || 0}
+            title="Available customer funds"
+            value={summary.available_credit || 0}
             formatter={(val) => formatINR(val)}
           />
         </Card>
@@ -175,7 +182,7 @@ export default function CustomerDuesPage() {
     <Space wrap>
       <Select
         value={customerType}
-        onChange={setCustomerType}
+        onChange={value => { setPage(1); setCustomerType(value); }}
         style={{ width: 180 }}
         placeholder="Customer Type"
       >
@@ -184,7 +191,7 @@ export default function CustomerDuesPage() {
         ))}
       </Select>
       <Space>
-        <Switch checked={overdueOnly} onChange={setOverdueOnly} />
+        <Switch checked={overdueOnly} onChange={value => { setPage(1); setOverdueOnly(value); }} />
         <span>Overdue Only</span>
       </Space>
     </Space>
@@ -201,7 +208,7 @@ export default function CustomerDuesPage() {
           </>
         }
         filters={filters}
-        summary={summaryCards}
+        summary={<>{reconciliation && <Alert type="warning" showIcon message="Some issued balances require reconciliation. Available customer funds are shown separately from invoice due." />}{summaryCards}</>}
         loading={loading}
         table={
           <Table
@@ -210,7 +217,7 @@ export default function CustomerDuesPage() {
             rowKey={(record) => record.id}
             size="small"
             scroll={{ x: 900 }}
-            pagination={{ pageSize: 50, showTotal: (total) => `Total ${total} customers` }}
+            pagination={{ current: page, pageSize: 50, total, showSizeChanger: false, onChange: setPage, showTotal: value => `Total ${value} customers` }}
             onRow={(record) => ({ style: getRowStyle(record) })}
           />
         }

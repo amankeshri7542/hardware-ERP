@@ -67,7 +67,11 @@ router.get('/barcode/:code', async (req, res, next) => {
 router.get('/', controller.listProducts);
 
 // Create product
-router.post('/', createProductSchema, validate, controller.createProduct);
+router.post('/', require('../../middleware/requireFinancialActor'), createProductSchema, validate, controller.createProduct);
+router.post('/:id/stock-adjustments', require('../../middleware/requireFinancialActor'), require('../../utils/asyncHandler')(async (req,res) => {
+  const result=await require('./catalogPosting').adjustStock(req.params.id,req.body,req.user.id,req.get('Idempotency-Key'));
+  res.status(result.status).json(result.body);
+}));
 
 // Get single product (must be AFTER all static routes)
 router.get('/:id', controller.getProduct);

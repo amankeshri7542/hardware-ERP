@@ -43,6 +43,9 @@ function applyHeaderStyle(sheet) {
  * Auto-fit column widths based on cell content length.
  */
 function autoFitColumns(sheet) {
+  sheet.eachRow((row, number) => { if (number > 1) row.eachCell(cell => {
+    if (typeof cell.value === 'string' && /^[\s]*[=+\-@\t\r]/.test(cell.value)) cell.value = "'" + cell.value;
+  }); });
   sheet.columns.forEach((column) => {
     let maxWidth = column.header ? String(column.header).length : 10;
     column.eachCell({ includeEmpty: false }, (cell) => {
@@ -108,8 +111,7 @@ async function buildSalesExport({ from, to, billType, customerId }) {
     billType,
     customerId,
     page: 1,
-    limit: 999999,
-  });
+  }, true);
 
   const rows = result.invoices || result.records || [];
   const summary = result.summary || {};
@@ -130,7 +132,7 @@ async function buildSalesExport({ from, to, billType, customerId }) {
     { header: 'Taxable', key: 'taxable_total', width: 14, style: { numFmt: CURRENCY_FORMAT } },
     { header: 'GST', key: 'gst_total', width: 14, style: { numFmt: CURRENCY_FORMAT } },
     { header: 'Grand Total', key: 'grand_total', width: 16, style: { numFmt: CURRENCY_FORMAT } },
-    { header: 'Paid', key: 'amount_paid', width: 14, style: { numFmt: CURRENCY_FORMAT } },
+    { header: 'Direct receipts as of end', key: 'amount_paid', width: 14, style: { numFmt: CURRENCY_FORMAT } },
     { header: 'Balance', key: 'balance_due', width: 14, style: { numFmt: CURRENCY_FORMAT } },
     { header: 'Status', key: 'status', width: 10 },
     { header: 'Profit', key: 'profit_amount', width: 14, style: { numFmt: CURRENCY_FORMAT } },
@@ -149,7 +151,7 @@ async function buildSalesExport({ from, to, billType, customerId }) {
       gst_total: Number(r.gstTotal) || Number(r.gst_total) || 0,
       grand_total: Number(r.grandTotal) || Number(r.grand_total) || 0,
       amount_paid: Number(r.amountPaid) || Number(r.amount_paid) || 0,
-      balance_due: Number(r.balanceDue) || Number(r.balance_due) || 0,
+      balance_due: r.balance_due === null ? null : Number(r.balanceDue ?? r.balance_due ?? 0),
       status: r.status,
       profit_amount: Number(r.profitAmount) || Number(r.profit_amount) || 0,
       profit_pct: (Number(r.profitPct) || Number(r.profit_pct) || 0) / 100,
@@ -163,10 +165,10 @@ async function buildSalesExport({ from, to, billType, customerId }) {
   addTotalRow(
     sheet,
     {
-      grand_total: summary.totalSales || summary.total_revenue || 0,
+      grand_total: Number(summary.total_sales) || 0,
       gst_total: summary.totalGst || summary.total_gst || 0,
-      amount_paid: summary.totalCollected || summary.total_paid || 0,
-      balance_due: summary.totalOutstanding || summary.total_balance || 0,
+      amount_paid: Number(summary.total_paid) || 0,
+      balance_due: Number(summary.total_outstanding) || 0,
       profit_amount: summary.totalProfit || summary.total_profit || 0,
     },
     'invoice_no'
@@ -208,13 +210,13 @@ async function buildGstExport({ month, year }) {
 
   invoices.forEach((r) => {
     const gst = Number(r.gstTotal) || Number(r.gst_total) || 0;
-    const gstin = r.customerGstin || r.gstin || '';
+    const gstin = r.customerGstin || r.customer_gstin || r.gstin || '';
     invoiceSheet.addRow({
       invoice_no: r.invoiceNo || r.invoice_no,
       date: formatDateValue(r.date),
       customer_name: r.customerName || r.customer_name || 'Walk-in',
       gstin: gstin,
-      category: r.invoiceCategory || (gstin ? 'B2B' : 'B2C'),
+      category: r.invoiceCategory || r.invoice_category || (gstin ? 'B2B' : 'B2C'),
       taxable_total: Number(r.taxableTotal) || Number(r.taxable_total) || 0,
       cgst: gst / 2,
       sgst: gst / 2,
@@ -266,10 +268,10 @@ async function buildGstExport({ month, year }) {
     { header: 'Invoice Total', key: 'grand_total', width: 16, style: { numFmt: CURRENCY_FORMAT } },
   ];
 
-  const b2bInvoices = invoices.filter((r) => r.customerGstin || r.gstin);
+  const b2bInvoices = invoices.filter((r) => r.customerGstin || r.customer_gstin || r.gstin);
   b2bInvoices.forEach((r) => {
     const gst = Number(r.gstTotal) || Number(r.gst_total) || 0;
-    const gstin = r.customerGstin || r.gstin;
+    const gstin = r.customerGstin || r.customer_gstin || r.gstin;
     b2bSheet.addRow({
       invoice_no: r.invoiceNo || r.invoice_no,
       date: formatDateValue(r.date),
@@ -388,8 +390,7 @@ async function buildStockMovementExport({ from, to, productId, movementType }) {
     productId,
     movementType,
     page: 1,
-    limit: 999999,
-  });
+  }, true);
 
   const rows = result.movements || result.records || [];
 
@@ -439,13 +440,13 @@ async function buildStockMovementExport({ from, to, productId, movementType }) {
 // Customer Dues Export
 // ---------------------------------------------------------------------------
 
-async function buildCustomerDuesExport({ overdueOnly, customerType }) {
+async function buildCustomerDuesExport({ overdueOnly, customerType, as_of }) {
   const result = await reportsService.getCustomerDuesReport({
     overdueOnly,
     customerType,
+    as_of,
     page: 1,
-    limit: 999999,
-  });
+  }, true);
 
   const rows = result.customers || result.records || [];
 
@@ -459,7 +460,11 @@ async function buildCustomerDuesExport({ overdueOnly, customerType }) {
     { header: 'Business Name', key: 'business_name', width: 25 },
     { header: 'Phone', key: 'phone', width: 14 },
     { header: 'Type', key: 'type', width: 12 },
-    { header: 'Outstanding', key: 'outstanding_balance', width: 16, style: { numFmt: CURRENCY_FORMAT } },
+    { header: 'Invoice due', key: 'outstanding_balance', width: 16, style: { numFmt: CURRENCY_FORMAT } },
+    { header: 'Available credits', key: 'available_credit', width: 18, style: { numFmt: CURRENCY_FORMAT } },
+    { header: 'Overdue', key: 'overdue_amount', width: 16, style: { numFmt: CURRENCY_FORMAT } },
+    { header: 'As of', key: 'as_of', width: 14 },
+    { header: 'Evidence', key: 'evidence', width: 24 },
     { header: 'Credit Limit', key: 'credit_limit', width: 16, style: { numFmt: CURRENCY_FORMAT } },
     { header: 'Unpaid Invoices', key: 'unpaid_invoices', width: 16 },
     { header: 'Last Invoice Date', key: 'last_invoice_date', width: 16 },
@@ -476,8 +481,12 @@ async function buildCustomerDuesExport({ overdueOnly, customerType }) {
       phone: r.phone,
       type: r.type || '',
       outstanding_balance: Number(r.outstandingBalance) || Number(r.outstanding_balance) || 0,
+      available_credit: Number(r.available_credit),
+      overdue_amount: Number(r.overdue_amount),
+      as_of: r.as_of,
+      evidence: r.reconciliation_required ? 'Reconciliation required' : 'Reconciled',
       credit_limit: Number(r.creditLimit) || Number(r.credit_limit) || 0,
-      unpaid_invoices: Number(r.unpaidInvoiceCount) || Number(r.unpaid_invoices) || 0,
+      unpaid_invoices: Number(r.unpaid_invoice_count ?? r.unpaidInvoiceCount ?? r.unpaid_invoices ?? 0),
       last_invoice_date: formatDateValue(r.lastInvoiceDate || r.last_invoice_date),
       oldest_unpaid_date: formatDateValue(oldestUnpaid),
     });
@@ -524,8 +533,7 @@ async function buildProfitExport({ from, to }) {
     from,
     to,
     page: 1,
-    limit: 999999,
-  });
+  }, true);
 
   const rows = result.invoices || result.records || [];
   const summary = result.summary || {};
@@ -606,8 +614,7 @@ async function buildCollectionsExport({ from, to, mode }) {
     to,
     mode,
     page: 1,
-    limit: 999999,
-  });
+  }, true);
 
   const rows = result.payments || result.records || [];
 
@@ -621,7 +628,9 @@ async function buildCollectionsExport({ from, to, mode }) {
     { header: 'Customer', key: 'customer_name', width: 25 },
     { header: 'Phone', key: 'phone', width: 14 },
     { header: 'Invoice No', key: 'invoice_no', width: 20 },
-    { header: 'Amount', key: 'amount', width: 16, style: { numFmt: CURRENCY_FORMAT } },
+    { header: 'Tender portion', key: 'amount', width: 16, style: { numFmt: CURRENCY_FORMAT } },
+    { header: 'Kind', key: 'kind', width: 22 },
+    { header: 'Direction', key: 'direction', width: 12 },
     { header: 'Mode', key: 'mode', width: 10 },
     { header: 'Reference No', key: 'reference_no', width: 20 },
     { header: 'Notes', key: 'notes', width: 30 },
@@ -634,6 +643,8 @@ async function buildCollectionsExport({ from, to, mode }) {
       phone: r.customerPhone || r.phone || '',
       invoice_no: r.invoiceNo || r.invoice_no || '',
       amount: Number(r.amount) || 0,
+      kind: r.kind,
+      direction: r.direction,
       mode: r.mode || '',
       reference_no: r.referenceNo || r.reference_no || '',
       notes: r.notes || '',
@@ -680,7 +691,7 @@ async function buildFullDataExport(res) {
     { header: 'GSTIN', key: 'gstin', width: 18 },
     { header: 'Type', key: 'type', width: 12 },
     { header: 'Credit Limit', key: 'credit_limit', width: 16, style: { numFmt: CURRENCY_FORMAT } },
-    { header: 'Outstanding', key: 'outstanding_balance', width: 16, style: { numFmt: CURRENCY_FORMAT } },
+    { header: 'Net ledger balance', key: 'outstanding_balance', width: 16, style: { numFmt: CURRENCY_FORMAT } },
     { header: 'Payment Terms', key: 'payment_terms', width: 16 },
     { header: 'Notes', key: 'notes', width: 30 },
     { header: 'Created At', key: 'created_at', width: 14 },
@@ -750,7 +761,7 @@ async function buildFullDataExport(res) {
   // ---- Sheet 3: Invoices ----
   const invoicesSheet = workbook.addWorksheet('Invoices');
   const { rows: invoices } = await pool.query(`
-    SELECT i.id, i.invoice_no, i.customer_id, c.name AS customer_name,
+    SELECT i.id, i.invoice_no, i.customer_id, COALESCE(i.customer_snapshot->>'name','Unknown issued party') AS customer_name,
            i.customer_name_walkin, i.bill_type, i.date, i.subtotal,
            i.discount_total, i.taxable_total, i.gst_total, i.grand_total,
            i.total_cost, i.profit_amount, i.profit_pct, i.amount_paid,
@@ -776,7 +787,7 @@ async function buildFullDataExport(res) {
     { header: 'Cost', key: 'total_cost', width: 14, style: { numFmt: CURRENCY_FORMAT } },
     { header: 'Profit', key: 'profit_amount', width: 14, style: { numFmt: CURRENCY_FORMAT } },
     { header: 'Margin %', key: 'profit_pct', width: 10 },
-    { header: 'Paid', key: 'amount_paid', width: 14, style: { numFmt: CURRENCY_FORMAT } },
+    { header: 'Direct receipts as of end', key: 'amount_paid', width: 14, style: { numFmt: CURRENCY_FORMAT } },
     { header: 'Balance', key: 'balance_due', width: 14, style: { numFmt: CURRENCY_FORMAT } },
     { header: 'Due Date', key: 'due_date', width: 14 },
     { header: 'Status', key: 'status', width: 10 },
@@ -872,9 +883,9 @@ async function buildFullDataExport(res) {
   autoFitColumns(itemsSheet);
 
   // ---- Sheet 5: Payments ----
-  const paymentsSheet = workbook.addWorksheet('Payments');
+  const paymentsSheet = workbook.addWorksheet('Original Receipts');
   const { rows: payments } = await pool.query(`
-    SELECT p.id, p.customer_id, c.name AS customer_name,
+    SELECT p.id, p.customer_id, COALESCE(p.customer_snapshot->>'name','Unknown issued party') AS customer_name,
            p.invoice_id, i.invoice_no, p.amount, p.mode,
            p.reference_no, p.payment_date, p.notes, p.created_at
     FROM payments p

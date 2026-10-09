@@ -34,62 +34,8 @@ function int(val) {
 // 1. Sales Report
 // ---------------------------------------------------------------------------
 
-async function getSalesReport({ from, to, billType, customerId, page = 1, limit = 50 }) {
-  const range = parseDateRange(from, to);
-  const offset = (page - 1) * limit;
-
-  const filterValues = [range.from, range.to, billType, customerId];
-
-  const recordsQuery = `
-    SELECT i.id, i.invoice_no, i.date, i.bill_type,
-      i.subtotal, i.discount_total, i.taxable_total, i.gst_total,
-      i.grand_total, i.amount_paid, i.balance_due, i.status,
-      i.profit_amount, i.profit_pct,
-      COALESCE(c.name, i.customer_name_walkin, 'Walk-In') AS customer_name,
-      c.phone AS customer_phone
-    FROM invoices i
-    LEFT JOIN customers c ON c.id = i.customer_id
-    WHERE i.date >= $1 AND i.date <= $2
-      AND ($3::text IS NULL OR i.bill_type = $3)
-      AND ($4::int IS NULL OR i.customer_id = $4)
-    ORDER BY i.date DESC, i.id DESC
-    LIMIT $5 OFFSET $6
-  `;
-
-  const summaryQuery = `
-    SELECT COUNT(*) AS total_invoices,
-      COALESCE(SUM(grand_total), 0) AS total_sales,
-      COALESCE(SUM(gst_total), 0) AS total_gst,
-      COALESCE(SUM(amount_paid), 0) AS total_collected,
-      COALESCE(SUM(balance_due), 0) AS total_outstanding,
-      COALESCE(SUM(profit_amount), 0) AS total_profit,
-      CASE WHEN SUM(taxable_total) != 0
-        THEN ROUND((SUM(profit_amount) / SUM(taxable_total) * 100)::numeric, 2)
-        ELSE 0
-      END AS avg_profit_pct
-    FROM invoices i
-    WHERE i.date >= $1 AND i.date <= $2
-      AND ($3::text IS NULL OR i.bill_type = $3)
-      AND ($4::int IS NULL OR i.customer_id = $4)
-  `;
-
-  const [recordsResult, summaryResult] = await Promise.all([
-    pool.query(recordsQuery, [...filterValues, limit, offset]),
-    pool.query(summaryQuery, filterValues),
-  ]);
-
-  const invoices = recordsResult.rows;
-  const s = summaryResult.rows[0];
-  const total = int(s.total_invoices);
-
-  return {
-    invoices,
-    summary: s,
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit),
-  };
+async function getSalesReport(query, allRows = false) {
+  return require('../settlements/reportingAdapters').sales(query, allRows);
 }
 
 // ---------------------------------------------------------------------------
@@ -117,15 +63,15 @@ async function getGstReport({ month, year }) {
 
   const invoiceQuery = `
     SELECT i.invoice_no, i.date, i.bill_type,
-      COALESCE(c.name, i.customer_name_walkin, 'Walk-In') AS customer_name,
-      c.gstin AS customer_gstin,
+      COALESCE(i.customer_snapshot->>'name', 'Unknown issued party') AS customer_name,
+      i.customer_snapshot->>'gstin' AS customer_gstin,
       i.taxable_total, i.gst_total, i.grand_total,
-      CASE WHEN c.gstin IS NOT NULL AND c.gstin != '' THEN 'B2B' ELSE 'B2C' END AS invoice_category
+      CASE WHEN NULLIF(i.customer_snapshot->>'gstin','') IS NOT NULL THEN 'B2B' ELSE 'B2C' END AS invoice_category
     FROM invoices i
     LEFT JOIN customers c ON c.id = i.customer_id
     WHERE i.date >= $1 AND i.date <= $2
     ORDER BY
-      CASE WHEN c.gstin IS NOT NULL AND c.gstin != '' THEN 'B2B' ELSE 'B2C' END DESC,
+      CASE WHEN NULLIF(i.customer_snapshot->>'gstin','') IS NOT NULL THEN 'B2B' ELSE 'B2C' END DESC,
       i.date ASC
   `;
 
@@ -200,7 +146,7 @@ async function getStockMovementReport({
   movementType,
   page = 1,
   limit = 50,
-}) {
+}, allRows = false) {
   const range = parseDateRange(from, to);
   const offset = (page - 1) * limit;
 
@@ -219,7 +165,7 @@ async function getStockMovementReport({
       AND ($3::int IS NULL OR sl.product_id = $3)
       AND ($4::text IS NULL OR sl.movement_type = $4)
     ORDER BY sl.date DESC, sl.id DESC
-    LIMIT $5 OFFSET $6
+    ${allRows ? '' : 'LIMIT $5 OFFSET $6'}
   `;
 
   const countQuery = `
@@ -233,7 +179,7 @@ async function getStockMovementReport({
   `;
 
   const [recordsResult, countResult] = await Promise.all([
-    pool.query(recordsQuery, [...filterValues, limit, offset]),
+    pool.query(recordsQuery, allRows ? filterValues : [...filterValues, limit, offset]),
     pool.query(countQuery, filterValues),
   ]);
 
@@ -256,62 +202,15 @@ async function getStockMovementReport({
 // 5. Customer Dues Report
 // ---------------------------------------------------------------------------
 
-async function getCustomerDuesReport({
-  overdueOnly = false,
-  customerType,
-  page = 1,
-  limit = 50,
-}) {
-  const offset = (page - 1) * limit;
-
-  const recordsQuery = `
-    SELECT c.id, c.name, c.business_name, c.phone, c.type,
-      c.outstanding_balance, c.credit_limit,
-      COUNT(DISTINCT i.id) FILTER (WHERE i.status IN ('unpaid','partial')) AS unpaid_invoice_count,
-      MAX(i.date) FILTER (WHERE i.status IN ('unpaid','partial')) AS last_invoice_date,
-      MIN(i.date) FILTER (WHERE i.status IN ('unpaid','partial')) AS oldest_unpaid_date
-    FROM customers c
-    LEFT JOIN invoices i ON i.customer_id = c.id
-    WHERE c.is_active = true
-      AND ($1::boolean IS NOT TRUE OR c.outstanding_balance > 0)
-      AND ($2::text IS NULL OR c.type = $2)
-    GROUP BY c.id
-    HAVING ($1::boolean IS NOT TRUE OR c.outstanding_balance > 0)
-    ORDER BY c.outstanding_balance DESC
-    LIMIT $3 OFFSET $4
-  `;
-
-  const countQuery = `
-    SELECT COUNT(*) AS total
-    FROM customers c
-    WHERE c.is_active = true
-      AND ($1::boolean IS NOT TRUE OR c.outstanding_balance > 0)
-      AND ($2::text IS NULL OR c.type = $2)
-  `;
-
-  const [recordsResult, countResult] = await Promise.all([
-    pool.query(recordsQuery, [overdueOnly, customerType || null, limit, offset]),
-    pool.query(countQuery, [overdueOnly, customerType || null]),
-  ]);
-
-  const total = int(countResult.rows[0].total);
-
-  return {
-    customers: recordsResult.rows,
-    pagination: {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    },
-  };
+async function getCustomerDuesReport(query, allRows = false) {
+  return require('../settlements/reportingAdapters').dues(query, allRows);
 }
 
 // ---------------------------------------------------------------------------
 // 6. Profit Report
 // ---------------------------------------------------------------------------
 
-async function getProfitReport({ from, to, page = 1, limit = 50 }) {
+async function getProfitReport({ from, to, page = 1, limit = 50 }, allRows = false) {
   const range = parseDateRange(from, to);
   const offset = (page - 1) * limit;
 
@@ -319,12 +218,12 @@ async function getProfitReport({ from, to, page = 1, limit = 50 }) {
     SELECT i.id, i.invoice_no, i.date, i.bill_type,
       i.taxable_total, i.total_cost, i.profit_amount, i.profit_pct,
       i.grand_total,
-      COALESCE(c.name, i.customer_name_walkin, 'Walk-In') AS customer_name
+      COALESCE(i.customer_snapshot->>'name', 'Unknown issued party') AS customer_name
     FROM invoices i
     LEFT JOIN customers c ON c.id = i.customer_id
     WHERE i.date >= $1 AND i.date <= $2
     ORDER BY i.date DESC, i.id DESC
-    LIMIT $3 OFFSET $4
+    ${allRows ? '' : 'LIMIT $3 OFFSET $4'}
   `;
 
   const summaryQuery = `
@@ -348,7 +247,7 @@ async function getProfitReport({ from, to, page = 1, limit = 50 }) {
   const params = [range.from, range.to];
 
   const [recordsResult, summaryResult, countResult] = await Promise.all([
-    pool.query(recordsQuery, [...params, limit, offset]),
+    pool.query(recordsQuery, allRows ? params : [...params, limit, offset]),
     pool.query(summaryQuery, params),
     pool.query(countQuery, params),
   ]);
@@ -371,55 +270,8 @@ async function getProfitReport({ from, to, page = 1, limit = 50 }) {
 // 7. Payment Collections Report
 // ---------------------------------------------------------------------------
 
-async function getPaymentCollectionsReport({ from, to, mode, page = 1, limit = 50 }) {
-  const range = parseDateRange(from, to);
-  const offset = (page - 1) * limit;
-
-  const filterValues = [range.from, range.to, mode];
-
-  const recordsQuery = `
-    SELECT p.id, p.payment_date, p.amount, p.mode, p.reference_no, p.notes,
-      COALESCE(c.name, 'Walk-In') AS customer_name, c.phone AS customer_phone,
-      i.invoice_no
-    FROM payments p
-    LEFT JOIN customers c ON c.id = p.customer_id
-    LEFT JOIN invoices i ON i.id = p.invoice_id
-    WHERE p.payment_date >= $1 AND p.payment_date <= $2
-      AND ($3::text IS NULL OR p.mode = $3)
-    ORDER BY p.payment_date DESC, p.id DESC
-    LIMIT $4 OFFSET $5
-  `;
-
-  const summaryQuery = `
-    SELECT COALESCE(SUM(amount), 0) AS total_collected,
-      COUNT(*) AS total_payments,
-      COALESCE(SUM(amount) FILTER (WHERE mode = 'cash'), 0) AS cash_total,
-      COALESCE(SUM(amount) FILTER (WHERE mode = 'upi'), 0) AS upi_total,
-      COALESCE(SUM(amount) FILTER (WHERE mode = 'bank'), 0) AS bank_total,
-      COALESCE(SUM(amount) FILTER (WHERE mode = 'cheque'), 0) AS cheque_total
-    FROM payments
-    WHERE payment_date >= $1 AND payment_date <= $2
-      AND ($3::text IS NULL OR mode = $3)
-  `;
-
-  const [recordsResult, summaryResult] = await Promise.all([
-    pool.query(recordsQuery, [...filterValues, limit, offset]),
-    pool.query(summaryQuery, filterValues),
-  ]);
-
-  const s = summaryResult.rows[0];
-  const total = int(s.total_payments);
-
-  return {
-    payments: recordsResult.rows,
-    summary: s,
-    pagination: {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    },
-  };
+async function getPaymentCollectionsReport(query, allRows = false) {
+  return require('../settlements/reportingAdapters').collections(query, allRows);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 const express = require('express');
 const authenticateJWT = require('../../middleware/authenticateJWT');
 const validate = require('../../middleware/validate');
+const requireFinancialActor = require('../../middleware/requireFinancialActor');
 const {
   createSupplierSchema,
   updateSupplierSchema,
@@ -23,11 +24,13 @@ suppliersRouter.get('/:id/debit-notes', controller.getSupplierDebitNotes);
 const purchasesRouter = express.Router();
 purchasesRouter.use(authenticateJWT);
 
-purchasesRouter.post('/', createPurchaseSchema, validate, controller.createPurchase);
+purchasesRouter.post('/', requireFinancialActor, createPurchaseSchema, validate, controller.createPurchase);
+purchasesRouter.post('/quote', controller.quotePurchase);
 purchasesRouter.get('/', controller.listPurchases);
 purchasesRouter.get('/:id', controller.getPurchase);
 purchasesRouter.put('/:id/notes', controller.updatePurchaseNotes);
-purchasesRouter.post('/:id/returns', controller.createPurchaseReturn);
+purchasesRouter.post('/:id/returns', requireFinancialActor, controller.createPurchaseReturn);
+purchasesRouter.post('/:id/returns/quote', controller.quotePurchaseReturn);
 purchasesRouter.get('/:id/returns', controller.getPurchaseReturns);
 purchasesRouter.post('/:id/invoice', controller.uploadInvoiceFile);
 purchasesRouter.get('/:id/invoice', controller.getInvoiceFileUrl);

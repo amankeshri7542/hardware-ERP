@@ -13,6 +13,7 @@ import {
 import { getSuppliers } from '../../api/suppliers.api';
 import { formatINR, formatDate } from '../../utils/formatCurrency';
 import ProductFormModal from './ProductFormModal';
+import StockCountModal from '../../components/StockCountModal.jsx';
 import PriceHistoryChart from '../../components/PriceHistoryChart';
 
 const { Title, Text } = Typography;
@@ -36,6 +37,7 @@ export default function ProductDetailPage() {
   const [dateRange, setDateRange] = useState([null, null]);
   const [typeFilter, setTypeFilter] = useState(undefined);
   const [modalOpen, setModalOpen] = useState(false);
+  const [countOpen,setCountOpen]=useState(false);
 
   // Price History state
   const [priceHistory, setPriceHistory] = useState([]);
@@ -216,9 +218,12 @@ export default function ProductDetailPage() {
           <Card
             title={<Title level={4} style={{ margin: 0 }}>{product.name}</Title>}
             extra={
+              <Space>
               <Button icon={<EditOutlined />} onClick={() => setModalOpen(true)}>
                 Edit
               </Button>
+              <Button onClick={()=>setCountOpen(true)}>Count stock</Button>
+              </Space>
             }
           >
             <Descriptions column={3} size="small">
@@ -409,6 +414,7 @@ export default function ProductDetailPage() {
         onSuccess={() => { fetchProduct(); fetchLedger(); }}
         productId={id}
       />
+      {product && <StockCountModal product={product} open={countOpen} onClose={()=>setCountOpen(false)} onSuccess={()=>{fetchProduct();fetchLedger();}} />}
     </div>
   );
 }

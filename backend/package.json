@@ -16,7 +16,7 @@
     "seed:test": "node ../db/seeds/index.js",
     "lint": "eslint src server.js worker.js scripts tests",
     "check:syntax": "node scripts/check-syntax.js",
-    "test:financial": "node ../scripts/run-local-tests.cjs --test tests/phase2/*.test.js tests/financial/*.test.js"
+    "test:financial": "node ../scripts/run-local-tests.cjs --test tests/phase2/*.test.js tests/phase3/*.test.js tests/phase4/*.test.js tests/financial/*.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.500.0",

@@ -140,7 +140,7 @@ const updateProductSchema = [
     const updatableFields = [
       'name', 'category', 'brand', 'unit', 'hsn_code', 'gst_rate',
       'mrp', 'wholesale_price', 'purchase_price', 'sku', 'barcode',
-      'min_stock', 'is_active',
+      'min_stock', 'is_active', 'base_unit', 'conversions',
     ];
     const hasAtLeastOne = updatableFields.some((field) => req.body[field] !== undefined);
     if (!hasAtLeastOne) {

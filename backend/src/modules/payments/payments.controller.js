@@ -15,11 +15,12 @@ const recordPayment = asyncHandler(async (req, res) => {
  * List all payments with optional filters.
  */
 const listPayments = asyncHandler(async (req, res) => {
-  const { from, to, mode, page, limit } = req.query;
+  const { from, to, mode, customer_id, page, limit } = req.query;
   const result = await paymentsService.listAllPayments({
     from,
     to,
     mode,
+    customer_id,
     page: parseInt(page, 10) || 1,
     limit: Math.min(100, Math.max(1, parseInt(limit, 10) || 20)),
   });

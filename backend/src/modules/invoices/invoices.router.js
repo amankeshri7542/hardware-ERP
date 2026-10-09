@@ -28,6 +28,7 @@ router.get('/:id/pdf', ctrl.getPdf);
 router.post('/:id/regenerate-pdf', ctrl.regeneratePdf);
 
 // Process sales return (credit note)
-router.post('/:id/return', returnInvoiceSchema, validate, ctrl.processReturn);
+router.post('/:id/return/quote', ctrl.quoteReturn);
+router.post('/:id/return', requireFinancialActor, returnInvoiceSchema, validate, ctrl.processReturn);
 
 module.exports = router;

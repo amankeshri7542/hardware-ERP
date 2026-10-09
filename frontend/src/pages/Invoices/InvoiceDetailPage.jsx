@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Card, Table, Tag, Button, Typography, Row, Col, Divider, Descriptions, Space,
   Spin, Alert, Tooltip, message,
@@ -96,8 +96,9 @@ export default function InvoiceDetailPage() {
     : invoice.bill_type?.charAt(0).toUpperCase() + invoice.bill_type?.slice(1);
 
   const balanceDue = invoice.balance_due;
-  const showPaymentAction = balanceDue > 0;
-  const isReturnable = invoice.status !== 'returned';
+  const isCredit=invoice.document_kind==='sales_return';
+  const showPaymentAction = !isCredit && balanceDue > 0;
+  const isReturnable = !isCredit && Number(invoice.grand_total)>=0 && invoice.items?.some(item=>Number(item.qty)>Number(item.qty_returned||0));
 
   // Line items columns
   const itemColumns = [
@@ -106,6 +107,8 @@ export default function InvoiceDetailPage() {
     { title: 'HSN', dataIndex: 'hsn_snapshot', width: 80 },
     { title: 'Qty', dataIndex: 'qty', width: 70, align: 'center' },
     { title: 'Unit', dataIndex: 'unit', width: 70 },
+    { title: 'Base stock qty', render:(_,item)=>`${item.base_qty ?? 'Unverified'} ${item.base_unit_snapshot ?? ''}` },
+    { title: 'Returned qty', dataIndex:'qty_returned', render:value=>value||'0.000' },
     {
       title: 'Rate', dataIndex: 'rate', width: 100, align: 'right',
       render: (v) => formatINR(v),
@@ -248,6 +251,19 @@ export default function InvoiceDetailPage() {
         </Col>
       </Row>
 
+      {isCredit && <Alert type="info" showIcon style={{marginBottom:16}} message="Sales credit note — no cash refund"
+        description={<a href={`/invoices/${invoice.original_invoice_id}`}>Original invoice {invoice.original_invoice_id}</a>} />}
+      {!invoice.customer_id && <Alert type="info" message="Eligible fully paid walk-in returns create a separate liability. Record its refund in Settlements." style={{marginBottom:16}} />}
+      <Link to={invoice.customer_id ? `/settlements/customer/${invoice.customer_id}` : '/settlements/anonymous'}>Open settlement availability and refunds</Link>
+      {!!invoice.return_applications?.length && <Card size="small" title="Return credits" style={{marginBottom:16}}>
+        <Table rowKey="id" pagination={false} dataSource={invoice.return_applications} columns={[
+          {title:'Credit note',render:(_,row)=><a href={`/invoices/${row.credit_invoice_id}`}>{row.credit_note_no}</a>},
+          {title:'Issued credit',dataIndex:'total_credit',render:formatINR},
+          {title:'Applied to original invoice',dataIndex:'applied_amount',render:formatINR},
+          {title:invoice.customer_id?'Original unapplied customer credit':'Original walk-in liability',dataIndex:'unapplied_amount',render:formatINR},
+        ]} />
+        <Text type="secondary">These amounts show original return recognition, not current availability. Review current funds, allocations, and refunds in Settlements.</Text>
+      </Card>}
       {/* Line Items */}
       <Card size="small" title="Line Items" style={{ marginBottom: 16 }}>
         <Table

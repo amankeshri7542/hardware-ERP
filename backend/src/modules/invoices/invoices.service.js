@@ -80,8 +80,8 @@ async function createInvoice(input, userId, key) {
     const { rows: [invoice] } = await client.query(
       `INSERT INTO invoices(customer_id,customer_name_walkin,bill_type,date,subtotal,discount_total,
         taxable_total,gst_total,grand_total,total_cost,profit_amount,profit_pct,amount_paid,balance_due,
-        due_date,status,created_by,pdf_status,notes)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'disabled',$18)
+        due_date,status,created_by,pdf_status,notes,document_kind,contract_version)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'disabled',$18,'sale','phase3-v1')
        RETURNING id,invoice_no`,
       [data.customer_id,data.customer_name_walkin,data.bill_type,data.date,totals.subtotal,totals.discount_total,
         totals.taxable_total,totals.gst_total,totals.grand_total,totals.total_cost,totals.profit_amount,totals.profit_pct,
@@ -132,7 +132,7 @@ async function getInvoiceById(id) {
       i.taxable_total, i.gst_total, i.grand_total, i.total_cost,
       i.profit_amount, i.profit_pct, i.amount_paid, i.balance_due,
       i.due_date, i.status, i.pdf_status, i.pdf_url,
-      i.notes, i.created_by, i.created_at,
+      i.notes, i.created_by, i.created_at, i.document_kind, i.contract_version, i.original_invoice_id,
       c.name AS customer_name, c.phone AS customer_phone,
       c.gstin AS customer_gstin,
       u.name AS created_by_name
@@ -151,7 +151,8 @@ async function getInvoiceById(id) {
       ii.hsn_snapshot, ii.qty, ii.unit, ii.rate, ii.discount_pct,
       ii.discount_amount, ii.taxable_amount, ii.gst_pct, ii.gst_amount,
       ii.line_total, ii.cost_price_snapshot, ii.line_profit,
-       ii.alt_qty, ii.alt_unit, ii.base_qty, ii.base_unit_snapshot,
+       ii.alt_qty, ii.alt_unit, ii.base_qty, ii.base_unit_snapshot, ii.qty_returned,
+      ii.original_invoice_item_id, ii.allocated_subtotal, ii.allocated_discount_total,
       p.name AS current_product_name, p.current_stock
     FROM invoice_items ii
     LEFT JOIN products p ON p.id = ii.product_id
@@ -163,6 +164,9 @@ async function getInvoiceById(id) {
   return {
     ...invoiceResult.rows[0],
     items: itemsResult.rows,
+    return_applications: (await pool.query(`SELECT a.*,c.invoice_no AS credit_note_no
+      FROM sales_return_applications a JOIN invoices c ON c.id=a.credit_invoice_id
+      WHERE a.original_invoice_id=$1 OR a.credit_invoice_id=$1 ORDER BY a.id`, [id])).rows,
   };
 }
 
@@ -234,7 +238,7 @@ async function listInvoices({ customerId, customerSearch, from, to, status, bill
     `SELECT
       i.id, i.invoice_no, i.customer_id, i.customer_name_walkin,
       i.bill_type, i.date, i.grand_total, i.amount_paid,
-      i.balance_due, i.status, i.profit_amount, i.pdf_status, i.created_at,
+      i.balance_due, i.status, i.profit_amount, i.pdf_status, i.created_at, i.document_kind, i.original_invoice_id,
       c.name AS customer_name, c.phone AS customer_phone
     FROM invoices i
     LEFT JOIN customers c ON c.id = i.customer_id
@@ -271,232 +275,7 @@ async function getPresignedPdfUrl() {
  * Process a sales return as an atomic transaction.
  * Creates a credit note (negative invoice) and restores stock.
  */
-async function processReturn(data, userId) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    // Fetch original invoice with FOR UPDATE lock
-    const origResult = await client.query(
-      `SELECT id, invoice_no, customer_id, bill_type, date
-       FROM invoices WHERE id = $1 FOR UPDATE`,
-      [data.original_invoice_id]
-    );
-    if (origResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      const err = new Error('Original invoice not found');
-      err.statusCode = 404;
-      err.errorCode = 'INVOICE_NOT_FOUND';
-      throw err;
-    }
-    const original = origResult.rows[0];
-
-    // Fetch original invoice items for validation (locked via parent invoice FOR UPDATE)
-    const origItemsResult = await client.query(
-      `SELECT id, product_id, qty, unit, rate, discount_pct, discount_amount,
-              gst_pct, cost_price_snapshot, product_name_snapshot, hsn_snapshot,
-              alt_qty, alt_unit, base_qty, qty_returned
-       FROM invoice_items WHERE invoice_id = $1`,
-      [data.original_invoice_id]
-    );
-    const origItemsMap = new Map();
-    for (const oi of origItemsResult.rows) {
-      origItemsMap.set(oi.id, oi);
-    }
-
-    // Validate and process each returned item
-    const returnItems = [];
-    for (const item of data.items) {
-      const origItem = origItemsMap.get(item.invoice_item_id);
-      if (!origItem) {
-        await client.query('ROLLBACK');
-        const err = new Error(`Invoice item ${item.invoice_item_id} not found on original invoice`);
-        err.statusCode = 422;
-        err.errorCode = 'INVALID_RETURN_ITEM';
-        throw err;
-      }
-      const alreadyReturned = parseFloat(origItem.qty_returned) || 0;
-      const remainingReturnable = parseFloat(origItem.qty) - alreadyReturned;
-      if (item.qty_returned > remainingReturnable) {
-        await client.query('ROLLBACK');
-        const err = new Error(
-          `Return qty (${item.qty_returned}) exceeds returnable qty (${remainingReturnable}) for item ${item.invoice_item_id}. Already returned: ${alreadyReturned}`
-        );
-        err.statusCode = 422;
-        err.errorCode = 'RETURN_QTY_EXCEEDS_ORIGINAL';
-        throw err;
-      }
-
-      // Compute return base qty
-      const returnRatio = item.qty_returned / parseFloat(origItem.qty);
-      const returnBaseQty = origItem.base_qty ? parseFloat(origItem.base_qty) * returnRatio : item.qty_returned;
-
-      // Restore stock
-      const stockResult = await client.query(
-        'UPDATE products SET current_stock = current_stock + $1, updated_at = NOW() WHERE id = $2 RETURNING current_stock',
-        [returnBaseQty, item.product_id]
-      );
-
-      // Stock ledger entry
-      await client.query(
-        `INSERT INTO stock_ledger (
-          product_id, date, movement_type, reference_id, reference_type,
-          qty_in, qty_out, stock_after, notes, created_by
-        ) VALUES ($1, NOW(), 'return_in', $2, 'return', $3, 0, $4, $5, $6)`,
-        [
-          item.product_id, data.original_invoice_id, returnBaseQty,
-          parseFloat(stockResult.rows[0].current_stock),
-          'Return against invoice ' + original.invoice_no,
-          userId,
-        ]
-      );
-
-      // Calculate return line totals using original item's pricing
-      const origRate = parseFloat(origItem.rate) || 0;
-      const discountAmount = parseFloat(origItem.discount_amount) || 0;
-      const taxableAmount = parseFloat(((origRate - discountAmount) * returnBaseQty).toFixed(2));
-      const gstAmount = parseFloat((taxableAmount * (parseFloat(origItem.gst_pct) / 100)).toFixed(2));
-      const lineTotal = parseFloat((taxableAmount + gstAmount).toFixed(2));
-      const lineProfit = parseFloat(((origRate - discountAmount - parseFloat(origItem.cost_price_snapshot)) * returnBaseQty).toFixed(2));
-
-      returnItems.push({
-        ...item,
-        rate: origRate,
-        product_name_snapshot: origItem.product_name_snapshot,
-        hsn_snapshot: origItem.hsn_snapshot,
-        discount_pct: parseFloat(origItem.discount_pct) || 0,
-        discount_amount: discountAmount,
-        taxable_amount: taxableAmount,
-        gst_pct: parseFloat(origItem.gst_pct),
-        gst_amount: gstAmount,
-        line_total: lineTotal,
-        cost_price_snapshot: parseFloat(origItem.cost_price_snapshot),
-        line_profit: lineProfit,
-        calc_qty: returnBaseQty,
-        unit: origItem.unit,
-        alt_unit: origItem.alt_unit,
-      });
-    }
-
-    // Calculate credit note totals
-    const returnSubtotal = returnItems.reduce((sum, i) => sum + parseFloat((i.rate * i.calc_qty).toFixed(2)), 0);
-    const returnDiscountTotal = returnItems.reduce((sum, i) => sum + parseFloat((i.discount_amount * i.calc_qty).toFixed(2)), 0);
-    const returnTaxableTotal = returnItems.reduce((sum, i) => sum + i.taxable_amount, 0);
-    const returnGstTotal = returnItems.reduce((sum, i) => sum + i.gst_amount, 0);
-    const returnGrandTotal = returnItems.reduce((sum, i) => sum + i.line_total, 0);
-    const returnTotalCost = returnItems.reduce((sum, i) => sum + parseFloat((i.cost_price_snapshot * i.calc_qty).toFixed(2)), 0);
-    const returnProfitAmount = parseFloat((returnTaxableTotal - returnTotalCost).toFixed(2));
-    const returnProfitPct = returnTaxableTotal > 0
-      ? parseFloat(((returnProfitAmount / returnTaxableTotal) * 100).toFixed(2))
-      : 0;
-
-    // INSERT credit note (negative grand_total)
-    const creditNoteResult = await client.query(
-      `INSERT INTO invoices (
-        customer_id, customer_name_walkin, bill_type, date,
-        subtotal, discount_total, taxable_total, gst_total,
-        grand_total, total_cost, profit_amount, profit_pct,
-        amount_paid, balance_due, status, pdf_status,
-        created_by
-      ) VALUES ($1,$2,$3,NOW(),$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-      RETURNING id, invoice_no`,
-      [
-        original.customer_id, null, original.bill_type,
-        -parseFloat(returnSubtotal.toFixed(2)),
-        -parseFloat(returnDiscountTotal.toFixed(2)),
-        -parseFloat(returnTaxableTotal.toFixed(2)),
-        -parseFloat(returnGstTotal.toFixed(2)),
-        -parseFloat(returnGrandTotal.toFixed(2)),
-        -parseFloat(returnTotalCost.toFixed(2)),
-        -parseFloat(returnProfitAmount.toFixed(2)),
-        returnProfitPct,
-        0, 0, 'paid', 'pending',
-        userId,
-      ]
-    );
-    const creditNote = creditNoteResult.rows[0];
-
-    // INSERT credit note items and update qty_returned on original items
-    for (const item of returnItems) {
-      await client.query(
-        `INSERT INTO invoice_items (
-          invoice_id, product_id, product_name_snapshot, hsn_snapshot,
-          qty, unit, rate, discount_pct, discount_amount,
-          taxable_amount, gst_pct, gst_amount, line_total,
-          cost_price_snapshot, line_profit, alt_qty, alt_unit, base_qty
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
-        [
-          creditNote.id, item.product_id, item.product_name_snapshot,
-          item.hsn_snapshot || null,
-          -item.qty_returned, item.unit, item.rate,
-          item.discount_pct, item.discount_amount,
-          -item.taxable_amount, item.gst_pct, -item.gst_amount, -item.line_total,
-          item.cost_price_snapshot, -item.line_profit,
-          item.alt_unit ? -item.qty_returned : null, item.alt_unit || null, item.alt_unit ? -item.calc_qty : null
-        ]
-      );
-
-      // Track cumulative returned qty on the original invoice item
-      await client.query(
-        `UPDATE invoice_items SET qty_returned = qty_returned + $1 WHERE id = $2`,
-        [item.qty_returned, item.invoice_item_id]
-      );
-    }
-
-    // Customer ledger credit entry (if customer exists and not quickbill)
-    if (original.customer_id && original.bill_type !== 'quickbill') {
-      await client.query(
-        `INSERT INTO customer_ledger (
-          customer_id, date, entry_type, reference_id, reference_type,
-          debit, credit, balance, description
-        ) VALUES ($1, NOW(), 'return', $2, 'invoice', 0, $3, 0, $4)`,
-        [
-          original.customer_id, creditNote.id,
-          parseFloat(returnGrandTotal.toFixed(2)),
-          'Credit note ' + creditNote.invoice_no + ' against ' + original.invoice_no,
-        ]
-      );
-      // balance updated by trigger (fn_sync_customer_outstanding)
-    }
-
-    // Update original invoice's balance_due to reflect the return
-    // NOTE: Do NOT modify grand_total — the credit note already has negative grand_total,
-    // so reports (SUM of grand_total) automatically account for the return.
-    const origInvResult = await client.query(
-      'SELECT balance_due, amount_paid FROM invoices WHERE id = $1 FOR UPDATE',
-      [data.original_invoice_id]
-    );
-    if (origInvResult.rows.length > 0) {
-      const origInv = origInvResult.rows[0];
-      const returnAmount = parseFloat(returnGrandTotal.toFixed(2));
-      const newBalanceDue = Math.max(0, parseFloat((parseFloat(origInv.balance_due) - returnAmount).toFixed(2)));
-      const paidAmt = parseFloat(origInv.amount_paid) || 0;
-      const newStatus = newBalanceDue <= 0 ? 'paid' : (paidAmt > 0 ? 'partial' : 'unpaid');
-      await client.query(
-        `UPDATE invoices SET balance_due = $1, status = $2 WHERE id = $3`,
-        [newBalanceDue, newStatus, data.original_invoice_id]
-      );
-    }
-
-    await client.query('COMMIT');
-
-    return {
-      credit_note_id: creditNote.id,
-      credit_note_no: creditNote.invoice_no,
-      original_invoice_id: original.id,
-      original_invoice_no: original.invoice_no,
-      grand_total: -parseFloat(returnGrandTotal.toFixed(2)),
-      items_returned: returnItems.length,
-    };
-  } catch (err) {
-    if (client && !err.errorCode) {
-      try { await client.query('ROLLBACK'); } catch (_) {}
-    }
-    throw err;
-  } finally {
-    client.release();
-  }
-}
+const { processReturn } = require('./salesReturns');
 
 /**
  * Generate PDF directly (fallback when Redis/BullMQ is unavailable).

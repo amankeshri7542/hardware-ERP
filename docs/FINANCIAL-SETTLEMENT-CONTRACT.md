@@ -1,0 +1,56 @@
+# Financial settlement contract — Phase 4 v1
+
+This contract is written before Phase 4 posting implementation. It governs admin-only local recordkeeping of operator-confirmed events in one INR shop. It does not execute or verify a bank/UPI transfer, send notifications, certify statutory accounts, enable documents, or grant cashier billing. Money uses the existing exact two-decimal helpers; IDs and dates are normalized before hashing, with positive amounts and exact concrete cash/UPI/bank/cheque tender sums. No fees, write-offs, interest, auto-netting or multicurrency are supported.
+
+## Evidence and new records
+
+Existing payments with no invoice are advance receipts: their money and customer-ledger credit already exist. An eligible source must reconcile its party, original receipt, tenders, ledger and supported issuing evidence. Existing immutable sales_return_applications.unapplied_amount is ORIGINAL unallocated recognition, not today's availability. Existing modern supplier debit notes already recognize a claim and returned stock; their stored outstanding status remains issued evidence, not current availability.
+
+New immutable settlement_events record kind, source_type/source_id, party, amount, date, reason, operator confirmation, event-time party snapshot, actor and timestamp. settlement_lines link multi-target applications; settlement_tenders describe actual concrete money portions. Full linked reversal events preserve originals and restore their effects prospectively on the reversal business date. supplier_payables explicitly recognize one modern reconciled receipt's full amount, supplier document reference and due date; receipt alone is not a payable. anonymous_return_liabilities link an anonymous paid original invoice and its credit note, never a fabricated customer. New party snapshots remain null for historical records; unknown issued identities are labeled unknown rather than filled from today's party.
+
+Current source availability = original valid recognized amount − allocations/refunds effective as of the requested date + their valid later reversals effective by that date. A reversal after the as-of date cannot rewrite that earlier report. Source identity/party/value are verified from original evidence; ledger balances and mutable status alone do not prove availability. No existing application, ledger, source, credit, purchase or payment is rewritten.
+
+## Commands and effects
+
+All commands require the current admin session, original Idempotency-Actor, stable key, business date and nonempty reason. Cash commands also require explicit operator_confirmed=true and exact positive concrete tenders. Quotes are read-only; UI submits the reviewed quote_hash, rechecked under locks. Deliberately changed reviewed intent uses a new operation; unknown completion retains its original key.
+
+| Kind | Source and target | Account / cash / remaining effects |
+|---|---|---|
+| customer_allocation | One verified advance or return_credit; one or more distinct ordinary invoices of same customer | Reduces target due and source availability; ZERO ledger credit, receipt or cash |
+| customer_refund | Available advance or return_credit | Customer ledger debit once; outgoing tenders; consumes source |
+| anonymous_refund | Verified anonymous liability | Outgoing tenders; reduces liability; no customer ledger/account |
+| payable_recognition | Modern reconciled purchase, active same supplier, exact full receipt amount, document reference/due date | Recognizes obligation once; no cash or stock |
+| supplier_payment | One recognized same-supplier payable | Reduces payable; outgoing tenders; no stock/revenue |
+| supplier_debit_application | Available original debit note to same-supplier payable | Reduces payable and claim; ZERO cash and no second claim recognition |
+| supplier_refund | Available original debit-note claim | Incoming tenders; consumes claim; original payment retained |
+| reversal | One unreversed supported settlement event | Full explicit opposite application/account/cash effect, dated later; no deletion or hidden cascading |
+| payment_reversal | Proven original customer receipt, unconsumed if advance | Full opposite recorded cash/account effect; direct invoice paid projection reduces and due restores; original receipt retained |
+| payable_reversal | Recognized payable with no active dependent settlement | Full prospective cancellation of recognition, with original retained; no cash/stock |
+
+Settlement reversal is corrective recordkeeping of an explicitly confirmed opposite cash event when cash is involved. It does not undo an external transfer. A consumed advance cannot be reversed until dependencies are separately reversed. Return/stock document cancellation is not a settlement reversal. Refund requires prior explicit deallocation of any already allocated value. All amounts/targets in a multi-invoice allocation succeed together or roll back together.
+
+Full reversal amounts and concrete tender portions derive from immutable original evidence. The operator reviews and confirms that opposite recorded event; it is never a provider cancellation. Customer reversal inputs reject replacement tender fields. Supplier reversal compatibility accepts an explicit amount/split only when it matches the original; omission derives them. A payable-recognition reversal also derives the full original amount. Reversals of reversals and partial reversals are unsupported; enter separate supported corrections only after explicit dependency resolution. All customer commands require operator confirmation, including allocations; submitting a supplier noncash recognition/application is the explicit acknowledgement, and the saved event records that fact.
+
+Anonymous Phase 3 extension: a fully paid, provably issued anonymous ordinary sale may produce a sellable return credit and linked liability in the same transaction as original stock effects/counters. It must prove original receipts/tenders and zero customer-ledger rows. Partial/full liability discharge is separate. Unknown legacy returns, unsupported damaged/quarantine disposition and unproven money remain blocked.
+
+## Invoice and supplier projections
+
+For an ordinary registered invoice: issued total = net direct receipts + original applied return credit + net Phase 4 allocations + due. amount_paid contains net direct cash receipts only; advance allocations and noncash credits are separately shown. Allocation of an old advance never becomes today's collection. A payment reversal is explicit evidence reducing net direct receipts, not an edit to the original payment. requireReconciledInvoice validates each supported source/application/reversal and retains historical inconsistency rejection.
+
+Supplier payable due = recognized value − active cash payments − active debit applications. Debit availability = original verified note value − active applications − active refunds. Statements recognize the original payable and claim once; applying a debit changes which obligation is settled but contributes zero net account/cash movement. Receivables and refundable customer sources, and payables and supplier claims, are displayed separately without automatic netting.
+
+## Locking, periods and daily close
+
+Order: idempotency reservation → shared shop-period advisory lock → source rows sorted by type/ID → all affected invoice/purchase/payable documents in deterministic order → original lines/products where applicable → party account. Existing sale/payment/return transactions retain their relative document/product/party ordering under the shared period gate. Reversal locks its original event/source before the same target ordering. No operation obtains a source lock after an account lock. Source consumption is serialized in PostgreSQL, never by cached balances or an in-memory mutex.
+
+Close takes the EXCLUSIVE version of the shop-period lock before reading money. Posting holds the shared lock through commit, then checks its date against the closed-through boundary. Thus close waits for prior postings, and later backdated postings reject. Replay of an already committed operation remains available after closing because saved-result lookup precedes new-business period validation. Database date triggers protect financial inserts; all inherited relevant API writers acquire the gate before row locks. No mutation is allowed to backdate on/before the latest closed date. Reversals use a later open date; original dates stay unchanged.
+
+Additionally, a new settlement/payment/return cannot precede a later source or target settlement event (`BACKDATED_SETTLEMENT_UNSUPPORTED`). Checking only current and as-of residuals would miss negative availability between those dates. Same-day competing events are serialized normally; reversals require a strictly later business date than their original. Confirmed future money/postings reject. These conservative v1 rules block the particular historical case instead of guessing an intervening balance.
+
+Shop timezone is explicit configuration stored as Asia/Kolkata for this existing INR single-shop contract. Business dates are local calendar dates; recorded_at/cutoff remain timestamptz. New opening float is explicitly entered for a day, not inferred from history. Subsequent openings must be the next calendar day after the prior close; counted prior cash is a suggested value, never an invented transfer. Expected closing = explicit opening + actual cash portions of customer receipts/advances and supplier refunds − customer/anonymous refunds and supplier payments, including dated cash reversals. Allocations contribute zero. v1 has no non-trading cash adjustments. Counted − expected is an immutable discrepancy requiring review, not an automatic balancing event. One opening/close per date; closed-through prevents late earlier postings and closed reports cannot silently change.
+
+## Reports, exports and recovery
+
+Statements expose effective-date ordering with recorded timestamp/ID tie-breakers, opening balance for the range and full-history running balance computed BEFORE filtering or paging. Show as-of source/target residuals with overdue = positive due and due_date < as_of; buckets current, 1–30, 31–60, 61–90, >90 days. Unknown legacy due/party/source evidence is explicitly flagged. Summary cards aggregate the complete filtered dataset; safe CSV exports share the same normalized dataset and neutralize leading formula characters. Gross sales, returns, net sales, profit, collections, refunds and supplier cash directions remain separate. Allocation has no new sales/cost effect. On-screen confirmations identify operator-confirmed recording; PDFs/attachments remain disabled.
+
+Every new mutation atomically persists all source-linked effects and an operation-specific successful result. Frontend persists operation, actor, targets, exact payload and key before dispatch; lost response/reload/account switch preserves that intent. A later rejection does not resolve an earlier uncertain attempt. Wrong-target recovery links to the original context. Failed transactions leave no permanent unusable reservation. Preserve original evidence and successful results; recover with compatible forward fixes, never historical edits or insecure old posting code.

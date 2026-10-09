@@ -1,7 +1,8 @@
 const { pool } = require('../../config/db');
-const { decimal, format, fail } = require('../../utils/financial');
+const { decimal, format, fail, positiveId } = require('../../utils/financial');
 const { withIdempotency } = require('../../utils/idempotency');
 const { normalizePaymentIntent, postPayment } = require('./paymentPosting');
+const { requireReconciledInvoice } = require('../../utils/invoiceReconciliation');
 
 // ─── Column lists (no SELECT *) ───────────────────────────────────
 
@@ -13,7 +14,8 @@ const PAYMENT_COLUMNS = `
 const PAYMENT_WITH_JOINS_COLUMNS = `
   p.id, p.customer_id, p.invoice_id, p.amount, p.mode,
   p.payment_date, p.reference_no, p.notes, p.created_at,
-  c.name AS customer_name, c.phone AS customer_phone,
+  COALESCE(p.customer_snapshot->>'name','Unknown issued customer') AS customer_name,
+  p.customer_snapshot->>'phone' AS customer_phone,
   i.invoice_no,
   u.name AS created_by_name
 `;
@@ -26,34 +28,6 @@ const PAYMENT_CUSTOMER_COLUMNS = `
 `;
 
 // ─── recordPayment (atomic transaction) ───────────────────────────
-
-async function requireReconciledInvoice(client, invoiceId) {
-  // Compare exact PostgreSQL numerics. Historical rows are evidence, never repaired here.
-  const { rows: [history] } = await client.query(`
-    SELECT i.amount_paid >= 0 AND i.balance_due >= 0
-      AND i.amount_paid + i.balance_due = i.grand_total
-      AND (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id=i.id) = i.amount_paid
-      AND (SELECT COALESCE(SUM(l.debit),0) FROM customer_ledger l
-           WHERE l.reference_type='invoice' AND l.reference_id=i.id) = i.grand_total
-      AND NOT EXISTS (
-        SELECT 1 FROM customer_ledger l WHERE l.reference_type='invoice' AND l.reference_id=i.id
-          AND (l.customer_id IS DISTINCT FROM i.customer_id OR l.entry_type <> 'invoice' OR l.credit <> 0 OR l.debit <= 0))
-      AND NOT EXISTS (
-        SELECT 1 FROM payments p WHERE p.invoice_id=i.id AND (
-          p.customer_id IS DISTINCT FROM i.customer_id OR p.amount <= 0
-          OR p.mode NOT IN ('cash','upi','bank','cheque','mixed')
-          OR (SELECT COALESCE(SUM(l.credit),0) FROM customer_ledger l
-              WHERE l.reference_type='payment' AND l.reference_id=p.id) <> p.amount
-          OR EXISTS (SELECT 1 FROM customer_ledger l WHERE l.reference_type='payment' AND l.reference_id=p.id
-              AND (l.customer_id IS DISTINCT FROM i.customer_id OR l.entry_type <> 'payment' OR l.debit <> 0 OR l.credit <= 0))
-          OR EXISTS (SELECT 1 FROM payment_modes_detail d WHERE d.payment_id=p.id
-              AND (d.amount <= 0 OR d.mode NOT IN ('cash','upi','bank','cheque') OR (p.mode <> 'mixed' AND d.mode <> p.mode)))
-          OR ((p.mode='mixed' OR EXISTS (SELECT 1 FROM payment_modes_detail d WHERE d.payment_id=p.id))
-              AND (SELECT COALESCE(SUM(d.amount),0) FROM payment_modes_detail d WHERE d.payment_id=p.id) <> p.amount)
-        )) AS reconciled
-    FROM invoices i WHERE i.id=$1`, [invoiceId]);
-  if (!history?.reconciled) fail('INVOICE_RECONCILIATION_REQUIRED');
-}
 
 async function recordPayment(data, userId, key) {
   const intent = normalizePaymentIntent(data);
@@ -78,6 +52,7 @@ async function recordPayment(data, userId, key) {
     let invoiceBalances;
     if (invoice) {
       await requireReconciledInvoice(client, invoice.id);
+      await require('../settlements/customer').requireInvoiceDate(client, invoice.id, intent.payment_date);
       const balance = decimal(invoice.balance_due, 2, 'invoice balance') - amount;
       const paid = decimal(invoice.amount_paid, 2, 'invoice paid') + amount;
       decimal(format(paid), 2, 'invoice paid');
@@ -177,10 +152,15 @@ async function getPaymentsByInvoice(invoiceId) {
 
 // ─── listAllPayments ──────────────────────────────────────────────
 
-async function listAllPayments({ from, to, mode, page = 1, limit = 20 } = {}) {
+async function listAllPayments({ from, to, mode, customer_id, page = 1, limit = 20 } = {}) {
   const conditions = [];
   const values = [];
   let idx = 1;
+
+  if (customer_id !== undefined) {
+    conditions.push(`p.customer_id = $${idx++}`);
+    values.push(positiveId(customer_id));
+  }
 
   if (from) {
     conditions.push(`p.payment_date >= $${idx++}`);
@@ -215,7 +195,7 @@ async function listAllPayments({ from, to, mode, page = 1, limit = 20 } = {}) {
      LEFT JOIN invoices i ON i.id = p.invoice_id
      LEFT JOIN users u ON u.id = p.created_by
      ${whereClause}
-     ORDER BY p.payment_date DESC, p.created_at DESC
+     ORDER BY p.payment_date DESC, p.created_at DESC, p.id DESC
      LIMIT $${idx++} OFFSET $${idx++}`,
     values
   );

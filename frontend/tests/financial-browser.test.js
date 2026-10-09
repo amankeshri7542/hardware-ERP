@@ -41,13 +41,14 @@ async function seed(gst='0.00',rate='10.01') {
 }
 async function loginPage(page,identity=email){
  await page.goto(`${origin}/login`);await page.getByLabel('Username / Email').fill(identity);await page.getByLabel('Password',{exact:true}).fill(password);
- await page.getByRole('button',{name:/sign in/i}).click();await page.waitForURL(`${origin}/dashboard`);
+ await page.getByRole('button',{name:/sign in/i}).click();await page.waitForURL(`${origin}/dashboard`);await expect(page.getByRole('heading',{name:'Dashboard',exact:true})).toBeVisible();
 }
 async function session(t){
  const context=await browser.newContext({serviceWorkers:'block',extraHTTPHeaders:{'X-Forwarded-For':`127.0.0.${++sessionNumber}`}});const attempted=new Set();
- const control={drop:null,requests:[],quoteGate:null,quoteReached:null,paymentGate:null,paymentReached:null};
+ const control={drop:null,requests:[],quoteGate:null,quoteReached:null,releaseQuote:null,paymentGate:null,paymentReached:null,releasePayment:null};
  await context.routeWebSocket('**/*',socket=>{attempted.add('websocket');socket.close();});
- await context.route('**/*',async route=>{
+ const guardedRequests=new Set();
+ await context.route('**/*',route=>{const pending=(async()=>{
   const request=route.request();const url=new URL(request.url());
   if(url.protocol==='data:' || (url.protocol==='blob:' && url.origin===origin)) return route.continue();
   if(url.origin!==origin){attempted.add(url.origin);return route.abort('blockedbyclient');}
@@ -60,8 +61,9 @@ async function session(t){
   if(request.method()==='POST' && url.pathname==='/api/payments' && control.paymentGate){control.paymentReached?.();await control.paymentGate;}
   if(request.method()==='POST' && url.pathname===control.drop){control.drop=null;assert.equal(response.status(),201,'Drop only a real successful committed response');return route.abort('failed');}
   return route.fulfill({response});
+ })();guardedRequests.add(pending);return pending.finally(()=>guardedRequests.delete(pending));
  });
- t.after(()=>assert.equal(attempted.size,0,'No nonlocal browser request or WebSocket may be attempted'));t.after(()=>context.close());
+ t.after(()=>assert.equal(attempted.size,0,'No nonlocal browser request or WebSocket may be attempted'));t.after(async()=>{control.releaseQuote?.();control.releasePayment?.();while(guardedRequests.size)await Promise.all([...guardedRequests]);await context.close();});
  const page=await context.newPage();page.setDefaultTimeout(12000);
  const runtime=[];page.on('pageerror',error=>runtime.push(error.message));t.after(()=>assert.deepEqual(runtime,[]));
  await loginPage(page);return {context,page,control};
@@ -124,7 +126,7 @@ test('catalog changes require a fresh explicit quote review and rejected intent 
 
 test('draft edits during an outstanding quote invalidate review before any financial post',async t=>{
  const fixture=await seed();const {page,control}=await session(t);await page.goto(`${origin}/billing/quick`);await addProduct(page,fixture,true);
- let release;control.quoteGate=new Promise(resolve=>{release=resolve;});const reached=new Promise(resolve=>{control.quoteReached=resolve;});
+ let release;control.quoteGate=new Promise(resolve=>{release=resolve;control.releaseQuote=resolve;});const reached=new Promise(resolve=>{control.quoteReached=resolve;});
  await clickQuick(page);await reached;await page.locator('.billing-rate-input input').fill('20.00');release();
  await expect(page.getByText('The draft changed while totals were checked. Review it again.')).toBeVisible();await expect(page.getByRole('button',{name:'Confirm invoice',exact:true})).toHaveCount(0);assert.equal(control.requests.length,0);
 });
@@ -140,7 +142,7 @@ test('registered Quick Bill debt and lost payment response use authoritative bal
  const dialog=page.getByRole('dialog',{name:'Record Payment'});await dialog.getByRole('spinbutton').fill('0.30');control.drop='/api/payments';await dialog.getByRole('button',{name:'Record Payment',exact:true}).click();
  await expect(page.getByText('Payment outcome needs confirmation')).toBeVisible();await page.reload();await page.getByRole('button',{name:'Recover saved payment'}).click();
  // Keep the actual committed replay response pending to exercise the loading icon's accessible name.
- let releasePayment;control.paymentGate=new Promise(resolve=>{releasePayment=resolve;});const paymentReached=new Promise(resolve=>{control.paymentReached=resolve;});
+ let releasePayment;control.paymentGate=new Promise(resolve=>{releasePayment=resolve;control.releasePayment=resolve;});const paymentReached=new Promise(resolve=>{control.paymentReached=resolve;});
  await page.getByRole('button',{name:'Retry original payment'}).click();await paymentReached;
  const retryButton=page.getByRole('dialog').locator('button').filter({hasText:'Retry original payment'});
  try {await expect(retryButton.getByRole('img',{name:'loading',exact:true})).toBeVisible();await expect(retryButton).toHaveAccessibleName('Retry original payment');await expect(retryButton).toBeDisabled();await expect(retryButton).toHaveAttribute('aria-busy','true');}

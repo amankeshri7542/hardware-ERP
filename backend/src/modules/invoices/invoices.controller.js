@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const asyncHandler = require('../../utils/asyncHandler');
 const invoicesService = require('./invoices.service');
+const salesReturns = require('./salesReturns');
 
 /**
  * POST /api/invoices
@@ -138,9 +139,14 @@ const regeneratePdf = asyncHandler(async () => {
  * POST /api/invoices/:id/return
  */
 const processReturn = asyncHandler(async (req, res) => {
-  const data = { ...req.body, original_invoice_id: parseInt(req.params.id, 10) };
-  const result = await invoicesService.processReturn(data, req.user.id);
-  res.status(201).json({ success: true, data: result });
+  const data = { ...req.body, original_invoice_id: req.params.id };
+  const result = await salesReturns.processReturn(data, req.user.id, req.get('Idempotency-Key'));
+  res.status(result.status).json(result.body);
+});
+
+const quoteReturn = asyncHandler(async (req, res) => {
+  const data = { ...req.body, original_invoice_id: req.params.id };
+  res.json({ success: true, data: await salesReturns.quoteReturn(data) });
 });
 
 module.exports = {
@@ -152,4 +158,5 @@ module.exports = {
   getPdf,
   regeneratePdf,
   processReturn,
+  quoteReturn,
 };

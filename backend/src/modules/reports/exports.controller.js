@@ -43,8 +43,8 @@ async function exportSales(req, res, next) {
     const dates = parseDateRange(from, to);
     const buffer = await buildSalesExport({
       ...dates,
-      billType: billType || null,
-      customerId: customerId ? parseInt(customerId, 10) : null,
+      billType: billType || req.query.bill_type || null,
+      customerId: (customerId || req.query.customer_id) ? parseInt(customerId || req.query.customer_id, 10) : null,
     });
     res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
     res.setHeader(
@@ -139,8 +139,9 @@ async function exportStockMovement(req, res, next) {
 
 async function exportCustomerDues(req, res, next) {
   try {
-    const { overdueOnly, customerType } = req.query;
+    const { overdueOnly, customerType, as_of } = req.query;
     const buffer = await buildCustomerDuesExport({
+      as_of,
       overdueOnly: overdueOnly === 'true',
       customerType: customerType || null,
     });
@@ -229,8 +230,8 @@ async function exportSalesPdf(req, res, next) {
     const dates = parseDateRange(from, to);
     const buffer = await buildSalesPdfExport({
       ...dates,
-      billType: billType || null,
-      customerId: customerId ? parseInt(customerId, 10) : null,
+      billType: billType || req.query.bill_type || null,
+      customerId: (customerId || req.query.customer_id) ? parseInt(customerId || req.query.customer_id, 10) : null,
     });
     res.setHeader('Content-Type', PDF_CONTENT_TYPE);
     res.setHeader('Content-Disposition', `attachment; filename="sales-${dates.from}-to-${dates.to}.pdf"`);
@@ -287,8 +288,9 @@ async function exportStockMovementPdf(req, res, next) {
 
 async function exportCustomerDuesPdf(req, res, next) {
   try {
-    const { overdueOnly, customerType } = req.query;
+    const { overdueOnly, customerType, as_of } = req.query;
     const buffer = await buildCustomerDuesPdfExport({
+      as_of,
       overdueOnly: overdueOnly === 'true',
       customerType: customerType || null,
     });

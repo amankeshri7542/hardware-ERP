@@ -100,8 +100,8 @@ export default function SupplierDetailPage() {
   const debitNoteColumns = [
     { title: 'Note No.', dataIndex: 'debit_note_no', key: 'debit_note_no' },
     { title: 'Date', dataIndex: 'date', key: 'date', render: val => new Date(val).toLocaleDateString() },
-    { title: 'Amount', dataIndex: 'amount', key: 'amount', render: val => formatINR(val) },
-    { title: 'Status', dataIndex: 'status', key: 'status', render: val => {
+    { title: 'Original amount', dataIndex: 'amount', key: 'amount', render: val => formatINR(val) },
+    { title: 'Original status', dataIndex: 'status', key: 'status', render: val => {
       const colors = { outstanding: 'red', adjusted: 'green', cancelled: 'default' };
       return <Tag color={colors[val]}>{val ? val.toUpperCase() : 'N/A'}</Tag>;
     }},
@@ -112,6 +112,7 @@ export default function SupplierDetailPage() {
     <div style={{ padding: '24px', maxWidth: 1200, margin: '0 auto' }}>
       <Space style={{ marginBottom: 16 }}>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/suppliers')}>Back to Suppliers</Button>
+        <Button onClick={() => navigate(`/settlements/supplier/${id}`)}>Open supplier settlements and statement</Button>
       </Space>
 
       <Card title={<Title level={4} style={{ margin: 0 }}>{supplier.name}</Title>}>
@@ -141,8 +142,8 @@ export default function SupplierDetailPage() {
             },
             {
               key: '3',
-              label: 'Returns & Debit Notes',
-              children: <Table columns={debitNoteColumns} dataSource={debitNotes} rowKey="id" pagination={{ pageSize: 10 }} />
+              label: 'Original Issued Debit Notes',
+              children: <><p><Text type="secondary">Amounts and status reflect the original issued notes. </Text><Button type="link" onClick={() => navigate(`/settlements/supplier/${id}`)}>View current remaining claims in settlements</Button></p><Table columns={debitNoteColumns} dataSource={debitNotes} rowKey="id" pagination={{ pageSize: 10 }} /></>
             }
           ]}
         />

@@ -1,10 +1,14 @@
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { setImmediate } = require('node:timers');
+const { lockWaiters } = require('../helpers/lockWaiters');
 const { app, request, pool, origin, setupActor, fixtureProduct, close } = require('../helpers/financial');
 after(close);
 async function put(product, body) {
   const actor = await setupActor();
+  // Phase 3 makes a reviewed catalog version explicit; retain the price/audit assertions.
+  const {rows:[current]}=await pool.query('SELECT catalog_version FROM products WHERE id=$1',[product.id]);
+  body={expected_catalog_version:current.catalog_version,...body};
   return request(app).put(`/api/products/${product.id}`).set('Origin', origin).set('Cookie', actor.cookie).set('X-Forwarded-For', actor.ip).send(body);
 }
 test('explicit catalog price edits retain complete attributed price history', async () => {
@@ -43,18 +47,27 @@ test('concurrent catalog edits serialize complete price snapshots and history in
   try {
     await blocker.query('BEGIN');
     await blocker.query('SELECT id FROM products WHERE id=$1 FOR UPDATE', [product.id]);
+    const blockerPid = (await blocker.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
     pending = Promise.all([put(product, { mrp: 125 }), put(product, { wholesale_price: 80 })]);
     const deadline = Date.now() + 5000;
     let waiting = 0;
     while (Date.now() < deadline) {
-      const { rows: [state] } = await pool.query("SELECT COUNT(*)::integer AS waiting FROM pg_stat_activity WHERE datname=current_database() AND usename=$1 AND wait_event_type='Lock' AND query ILIKE '%products%'", [process.env.TEST_APP_DB_USER]);
-      waiting = state.waiting;
+      waiting = await lockWaiters(pool, blockerPid);
       if (waiting >= 2) break;
       await new Promise(resolve => setImmediate(resolve));
     }
     assert.ok(waiting >= 2, 'Both edits overlap while the product row is locked');
     await blocker.query('COMMIT');
-    for (const response of await pending) assert.equal(response.status, 200, JSON.stringify(response.body));
+    const results=await pending;
+    const changes=[{mrp:125},{wholesale_price:80}];
+    assert.equal(results.filter(response=>response.status===200).length,1);
+    for (let index=0;index<results.length;index++) {
+      const response=results[index];
+      if(response.status===409) {
+        assert.equal(response.body.code,'CATALOG_CHANGED');
+        assert.equal((await put(product,changes[index])).status,200,'A reviewed retry uses the current version');
+      } else assert.equal(response.status,200,JSON.stringify(response.body));
+    }
   } finally {
     await blocker.query('ROLLBACK'); blocker.release();
     if (pending) await pending;

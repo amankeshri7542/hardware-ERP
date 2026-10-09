@@ -4,21 +4,8 @@ const { pool } = require('../../config/db');
 const PRODUCT_COLUMNS = `
   id, name, category, brand, sku, barcode, unit, base_unit, hsn_code,
   gst_rate, mrp, wholesale_price, purchase_price,
-  current_stock, min_stock, is_active, created_at, updated_at
+  current_stock, min_stock, is_active, stock_version, catalog_version, created_at, updated_at
 `;
-
-const PRODUCT_INSERT_COLUMNS = [
-  'name', 'category', 'brand', 'sku', 'barcode', 'unit', 'base_unit', 'hsn_code',
-  'gst_rate', 'mrp', 'wholesale_price', 'purchase_price',
-  'current_stock', 'min_stock', 'is_active',
-];
-
-// ─── Allowed fields for dynamic UPDATE ────────────────────────────
-const UPDATABLE_FIELDS = new Set([
-  'name', 'category', 'brand', 'sku', 'barcode', 'unit', 'base_unit', 'hsn_code',
-  'gst_rate', 'mrp', 'wholesale_price', 'purchase_price',
-  'min_stock', 'is_active', 'current_stock',
-]);
 
 /**
  * List products with filters & pagination.
@@ -64,7 +51,7 @@ async function getAllProducts({ search, category, isActive, lowStockOnly, page =
   const result = await pool.query(
     `SELECT p.id, p.name, p.category, p.brand, p.sku, p.barcode, p.unit, p.base_unit,
        p.hsn_code, p.gst_rate, p.mrp, p.wholesale_price, p.purchase_price,
-       p.current_stock, p.min_stock, p.is_active, p.created_at, p.updated_at,
+       p.current_stock, p.min_stock, p.is_active, p.stock_version, p.catalog_version, p.created_at, p.updated_at,
        (SELECT json_agg(json_build_object(
           'id', uc.id, 'unit_name', uc.unit_name,
           'conversion_value', uc.conversion_value
@@ -85,7 +72,12 @@ async function getAllProducts({ search, category, isActive, lowStockOnly, page =
  */
 async function getProductById(id) {
   const { rows } = await pool.query(
-    `SELECT ${PRODUCT_COLUMNS} FROM products WHERE id = $1`,
+    `SELECT ${PRODUCT_COLUMNS},
+      (SELECT COALESCE(json_agg(json_build_object('id',c.id,'unit_name',c.unit_name,
+        'conversion_value',c.conversion_value::text,'is_sales_unit',c.is_sales_unit,
+        'is_purchase_unit',c.is_purchase_unit) ORDER BY c.id),'[]'::json)
+       FROM product_unit_conversions c WHERE c.product_id=products.id) AS conversions
+     FROM products WHERE id = $1`,
     [id],
   );
   return rows[0] || null;
@@ -95,196 +87,8 @@ async function getProductById(id) {
  * Create a new product.
  * Handles pg 23505 (unique violation) for sku/barcode.
  */
-async function createProduct(data) {
-  // Convert empty strings to null for unique-constrained fields
-  if (data.sku !== undefined && !data.sku) data.sku = null;
-  if (data.barcode !== undefined && !data.barcode) data.barcode = null;
+const { createProduct, updateProduct, adjustStock } = require('./catalogPosting');
 
-  // Auto-sync base_unit: if not explicitly provided, default to unit
-  if (!data.base_unit && data.unit) {
-    data.base_unit = data.unit;
-  }
-
-  const columns = [];
-  const placeholders = [];
-  const values = [];
-  let idx = 1;
-
-  for (const col of PRODUCT_INSERT_COLUMNS) {
-    if (data[col] !== undefined) {
-      columns.push(col);
-      placeholders.push(`$${idx++}`);
-      values.push(data[col]);
-    }
-  }
-
-  try {
-    const { rows } = await pool.query(
-      `INSERT INTO products (${columns.join(', ')})
-       VALUES (${placeholders.join(', ')})
-       RETURNING id, name, sku, barcode, current_stock`,
-      values,
-    );
-    return rows[0];
-  } catch (err) {
-    if (err.code === '23505') {
-      if (err.constraint && err.constraint.includes('sku')) {
-        const error = new Error('A product with this SKU already exists');
-        error.statusCode = 409;
-        error.errorCode = 'DUPLICATE_SKU';
-        throw error;
-      }
-      if (err.constraint && err.constraint.includes('barcode')) {
-        const error = new Error('A product with this barcode already exists');
-        error.statusCode = 409;
-        error.errorCode = 'DUPLICATE_BARCODE';
-        throw error;
-      }
-      throw err; // re-throw if unknown unique constraint
-    }
-    throw err;
-  }
-}
-
-/**
- * Dynamic UPDATE — only updates fields present in data.
- * If current_stock is being changed, creates a stock_ledger entry.
- */
-async function updateProduct(id, data, userId) {
-  // Convert empty strings to null for unique-constrained fields
-  if (data.sku !== undefined && !data.sku) data.sku = null;
-  if (data.barcode !== undefined && !data.barcode) data.barcode = null;
-
-  // Auto-sync base_unit when unit changes (unless base_unit explicitly provided)
-  if (data.unit && !data.base_unit) {
-    data.base_unit = data.unit;
-  }
-
-  const hasStockChange = data.current_stock !== undefined;
-  const priceFields = ['mrp', 'wholesale_price', 'purchase_price'];
-  const hasPriceChange = priceFields.some(field => data[field] !== undefined);
-  const { decimal, format } = require('../../utils/financial');
-  for (const field of priceFields) {
-    if (data[field] !== undefined) data[field] = format(decimal(data[field], 2));
-  }
-
-  const fields = [];
-  const values = [];
-  let idx = 1;
-
-  for (const [key, val] of Object.entries(data)) {
-    if (UPDATABLE_FIELDS.has(key)) {
-      fields.push(`${key} = $${idx++}`);
-      values.push(val);
-    }
-  }
-
-  if (fields.length === 0) {
-    const error = new Error('No valid fields to update');
-    error.statusCode = 422;
-    error.errorCode = 'NO_FIELDS';
-    throw error;
-  }
-
-  fields.push(`updated_at = NOW()`);
-  values.push(id);
-
-  // Price history and stock movements commit with their product update.
-  const client = hasStockChange || hasPriceChange ? await pool.connect() : null;
-  const query = client ? client.query.bind(client) : pool.query.bind(pool);
-
-  try {
-    if (client) await client.query('BEGIN');
-
-    // Get old stock before update (inside transaction for consistency)
-    let oldStock = null;
-    let oldProduct = null;
-    if (client) {
-      const existing = await query(
-        'SELECT current_stock,mrp,wholesale_price,purchase_price FROM products WHERE id = $1 FOR UPDATE', [id]
-      );
-      if (existing.rows.length > 0) {
-        oldProduct = existing.rows[0];
-        oldStock = parseFloat(oldProduct.current_stock);
-      }
-    }
-
-    const { rows } = await query(
-      `UPDATE products
-       SET ${fields.join(', ')}
-       WHERE id = $${idx}
-       RETURNING ${PRODUCT_COLUMNS}`,
-      values,
-    );
-
-    if (rows.length === 0) {
-      const error = new Error('Product not found');
-      error.statusCode = 404;
-      error.errorCode = 'PRODUCT_NOT_FOUND';
-      throw error;
-    }
-
-    // Create stock_ledger entry for manual stock adjustment
-    if (hasStockChange && oldStock !== null) {
-      const newStock = parseFloat(data.current_stock);
-      const diff = newStock - oldStock;
-      if (diff !== 0) {
-        await query(
-          `INSERT INTO stock_ledger (
-            product_id, date, movement_type, reference_id, reference_type,
-            qty_in, qty_out, stock_after, notes, created_by
-          ) VALUES ($1, NOW(), 'adjustment', NULL, 'manual', $2, $3, $4, $5, $6)`,
-          [
-            id,
-            diff > 0 ? diff : 0,
-            diff < 0 ? Math.abs(diff) : 0,
-            newStock,
-            'Manual stock adjustment',
-            userId || null,
-          ]
-        );
-      }
-    }
-
-    if (hasPriceChange && priceFields.some(field => rows[0][field] !== oldProduct[field])) {
-      const { rows: [clock] } = await query('SELECT clock_timestamp()::text AS changed_at');
-      await query('UPDATE product_price_history SET effective_to=$2 WHERE product_id=$1 AND effective_to IS NULL', [id,clock.changed_at]);
-      await query(
-        `INSERT INTO product_price_history(product_id,purchase_price,wholesale_price,mrp,source,changed_by,effective_from)
-         VALUES($1,$2,$3,$4,'manual',$5,$6)`,
-        [id,rows[0].purchase_price,rows[0].wholesale_price,rows[0].mrp,userId,clock.changed_at]);
-    }
-
-    if (client) await client.query('COMMIT');
-    return rows[0];
-  } catch (err) {
-    if (client) {
-      try { await client.query('ROLLBACK'); } catch (_) {}
-    }
-    if (err.code === '23505') {
-      if (err.constraint && err.constraint.includes('sku')) {
-        const error = new Error('A product with this SKU already exists');
-        error.statusCode = 409;
-        error.errorCode = 'DUPLICATE_SKU';
-        throw error;
-      }
-      if (err.constraint && err.constraint.includes('barcode')) {
-        const error = new Error('A product with this barcode already exists');
-        error.statusCode = 409;
-        error.errorCode = 'DUPLICATE_BARCODE';
-        throw error;
-      }
-    }
-    throw err;
-  } finally {
-    if (client) client.release();
-  }
-}
-
-/**
- * Soft-delete a product (set is_active = false).
- * Blocks if the product has any invoice_items (billing history).
- */
 async function softDeleteProduct(id) {
   // Check for billing history
   const historyCheck = await pool.query(
@@ -436,28 +240,8 @@ async function getUnitConversions(productId) {
   return rows;
 }
 
-async function createUnitConversion(productId, data) {
-  const { rows } = await pool.query(
-    `INSERT INTO product_unit_conversions (product_id, unit_name, conversion_value, is_purchase_unit, is_sales_unit)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, product_id, unit_name, conversion_value, is_purchase_unit, is_sales_unit`,
-    [productId, data.unit_name, data.conversion_value, data.is_purchase_unit || false, data.is_sales_unit || false],
-  );
-  return rows[0];
-}
-
-async function deleteUnitConversion(conversionId) {
-  const { rowCount } = await pool.query(
-    `DELETE FROM product_unit_conversions WHERE id = $1`,
-    [conversionId],
-  );
-  if (rowCount === 0) {
-    const error = new Error('Unit conversion not found');
-    error.statusCode = 404;
-    error.errorCode = 'CONVERSION_NOT_FOUND';
-    throw error;
-  }
-}
+async function createUnitConversion() { require('../../utils/financial').fail('ATOMIC_CATALOG_UPDATE_REQUIRED'); }
+async function deleteUnitConversion() { require('../../utils/financial').fail('ATOMIC_CATALOG_UPDATE_REQUIRED'); }
 
 /**
  * Unlink a supplier from a product.
@@ -479,6 +263,7 @@ module.exports = {
   getAllProducts,
   getProductById,
   createProduct,
+  adjustStock,
   updateProduct,
   softDeleteProduct,
   getProductStockLedger,
