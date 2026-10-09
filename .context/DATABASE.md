@@ -1,3 +1,13 @@
+> Phase 2 billing/payment behavior is defined in ../docs/BILLING-PAYMENT-CONTRACT.md
+> and verified in ../docs/PHASE-2-REPORT.md. Billing/payment descriptions below are
+> historical: client cost/base quantity is not authoritative, sales do not change
+> catalog prices, and invoice/payment mutations require durable operation keys.
+> Cashier billing, PDFs and attachments remain disabled.
+
+> Historical reference. Phase 1 changes and verified behavior are documented in
+> ../docs/PHASE-1-REPORT.md and ../docs/SECURITY-RUNBOOK.md. Old auth, PDF, upload,
+> deployment and setup descriptions below are superseded. Do not use historical credentials.
+
 # Database Schema
 
 > Last updated: 2026-04-17

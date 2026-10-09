@@ -1,3 +1,13 @@
+> Phase 2 billing/payment behavior is defined in ../docs/BILLING-PAYMENT-CONTRACT.md
+> and verified in ../docs/PHASE-2-REPORT.md. Billing/payment descriptions below are
+> historical: client cost/base quantity is not authoritative, sales do not change
+> catalog prices, and invoice/payment mutations require durable operation keys.
+> Cashier billing, PDFs and attachments remain disabled.
+
+> Historical reference. Phase 1 changes and verified behavior are documented in
+> ../docs/PHASE-1-REPORT.md and ../docs/SECURITY-RUNBOOK.md. Old auth, PDF, upload,
+> deployment and setup descriptions below are superseded. Do not use historical credentials.
+
 # Frontend — React Application
 
 > Last updated: 2026-04-17
@@ -44,14 +54,12 @@
 
 ## State Management
 
-### Auth Store (`store/authStore.js` — Zustand)
-```
-State:  accessToken, user, isAuthenticated, isInitializing
-Actions: login(token, user), logout(), setToken(token), initialize()
-```
-- `initialize()` called on app mount — attempts refresh token, fallback to localStorage
-- On 401 response: axios interceptor calls `logout()` + redirects to `/login`
-- Token persisted in localStorage (`erp_token`, `erp_user`) as HTTP-only fallback
+### Auth Store (Phase 1)
+
+The store initializes once from `GET /api/auth/session` and keeps only the user and
+capabilities in memory. Cookies are HttpOnly. Legacy auth storage keys are removed;
+unrelated drafts are preserved. A 401 clears the in-memory session without page
+reload, refresh loops or mutation retries. Logout waits for backend revocation.
 
 ### Billing Store (`store/billingStore.js` — Zustand with persistence)
 - Persists billing draft to localStorage (`hardware-erp-billing-draft`)

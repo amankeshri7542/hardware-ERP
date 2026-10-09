@@ -197,7 +197,7 @@ export default function CustomerDuesPage() {
         exportButton={
           <>
             <Button icon={<DownloadOutlined />} loading={exporting} onClick={handleExport}>Export Excel</Button>
-            <Button icon={<FilePdfOutlined />} loading={exportingPdf} onClick={handleExportPdf} danger>Export PDF</Button>
+            <Button icon={<FilePdfOutlined />} disabled title="PDF exports are temporarily unavailable while safety checks are completed">PDF unavailable</Button>
           </>
         }
         filters={filters}

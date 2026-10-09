@@ -4,18 +4,24 @@ const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const errorHandler = require('./middleware/errorHandler');
+const { validateEnvironment } = require('./config/env');
+const { requestContext } = require('./utils/securityLog');
+const checkOrigin = require('./middleware/checkOrigin');
+const authenticateSession = require('./middleware/authenticateJWT');
+const { authorize } = require('./middleware/authorize');
+const config = validateEnvironment();
 
 const app = express();
 
-// Trust nginx reverse proxy (fixes express-rate-limit X-Forwarded-For error)
-app.set('trust proxy', 1);
+app.set('trust proxy', config.trustProxy);
+app.use(requestContext);
 
 // Security headers
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:', 'blob:'],
       connectSrc: ["'self'"],
@@ -29,6 +35,7 @@ app.use(helmet({
 
 // Global API rate limiter: 200 requests per minute per IP
 const apiLimiter = rateLimit({
+  keyGenerator: require('./middleware/rateLimitKey'),
   windowMs: 60 * 1000,
   max: 200,
   standardHeaders: true,
@@ -37,15 +44,12 @@ const apiLimiter = rateLimit({
 });
 app.use('/api/', apiLimiter);
 
+app.use(cors({ origin: config.corsOrigins, credentials: true }));
+app.use('/api', checkOrigin);
+
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-
-// CORS
-app.use(cors({
-  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : 'http://localhost:5173',
-  credentials: true,
-}));
 
 // Cookie parser
 app.use(cookieParser());
@@ -58,6 +62,7 @@ app.get('/api/health', (req, res) => {
 // Mount module routers
 const authRouter = require('./modules/auth/auth.router');
 app.use('/api/auth', authRouter);
+app.use('/api', authenticateSession, authorize);
 
 const productsRouter = require('./modules/products/products.router');
 app.use('/api/products', productsRouter);
@@ -109,4 +114,3 @@ if (process.env.NODE_ENV === 'production') {
 app.use(errorHandler);
 
 module.exports = app;
-

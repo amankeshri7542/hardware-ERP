@@ -14,22 +14,14 @@ import ProductSearch from '../../components/ProductSearch/ProductSearch';
 import CustomerSearch from '../../components/CustomerSearch/CustomerSearch';
 import { useBilling } from '../../hooks/useBilling';
 import { formatINR, formatDate } from '../../utils/formatCurrency';
-import { getPdfStatus, openInvoicePdf } from '../../api/invoices.api';
-import { getUnitConversions, updateProduct } from '../../api/products.api';
+import { getUnitConversions } from '../../api/products.api';
 import ProductFormModal from '../Products/ProductFormModal';
 import CustomerFormModal from '../Customers/CustomerFormModal';
 import './BillingPage.css';
+import InvoiceReview from '../../components/InvoiceReview/InvoiceReview';
+import { moneySum, quantityIncrement } from '../../utils/billing.calculations.js';
 
 const { Title, Text } = Typography;
-
-// All units commonly used in a hardware shop
-const HARDWARE_UNITS = [
-  'piece', 'kg', 'g', 'quintal', 'tonne',
-  'bag', 'box', 'bundle', 'roll',
-  'litre', 'ml',
-  'metre', 'foot', 'inch', 'cm',
-  'sheet', 'plate', 'set', 'pair', 'no.',
-];
 
 const PAYMENT_MODES = [
   { key: 'cash', label: 'Cash', icon: <WalletOutlined /> },
@@ -39,6 +31,7 @@ const PAYMENT_MODES = [
 ];
 
 export default function BillingPage() {
+  const billing = useBilling('retail');
   const {
     customer, setCustomer,
     billType, setBillType,
@@ -47,7 +40,8 @@ export default function BillingPage() {
     isSubmitting, errors, setErrors,
     totals, balanceDue, paymentStatus,
     submitInvoice, resetBilling,
-  } = useBilling('retail');
+    locked, invoiceResult, setFullPayment,
+  } = billing;
 
   // Quick-bill walk-in name
   const [walkinName, setWalkinName] = useState('');
@@ -56,15 +50,10 @@ export default function BillingPage() {
   const [showProductModal, setShowProductModal] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
 
-  // Auto-save edited prices to Product Master
-  const [autoSavePrices, setAutoSavePrices] = useState(false);
 
   // Post-submission modal
   const [submittedInvoice, setSubmittedInvoice] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [pdfReady, setPdfReady] = useState(false);
-  const [pdfPolling, setPdfPolling] = useState(false);
-  const pdfPollRef = useRef(null);
 
   // Payment mode input state
   const [payModeSelected, setPayModeSelected] = useState('cash');
@@ -106,7 +95,11 @@ export default function BillingPage() {
 
   // ───── Keyboard shortcuts ─────
   useEffect(() => {
-    const handleGlobalKeyDown = (e) => {
+    const handleGlobalKeyDown = async (e) => {
+      if(locked || isSubmitting || billing.review || submittedInvoice) {
+        if(['F2','F4','F9','Escape'].includes(e.key)) e.preventDefault();
+        return;
+      }
       // F2 → toggle Quick Bill
       if (e.key === 'F2') {
         e.preventDefault();
@@ -127,7 +120,7 @@ export default function BillingPage() {
       if (e.key === 'Escape') {
         if (items.length > 0) {
           e.preventDefault();
-          resetBilling();
+          if (!await resetBilling()) return;
           setWalkinName('');
           setPayModeAmount(0);
           setPayModeRef('');
@@ -139,16 +132,13 @@ export default function BillingPage() {
       if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
         if (submittedInvoice) {
           e.preventDefault();
-          openInvoicePdf(submittedInvoice.invoice_id).catch(() =>
-            message.error('Failed to open PDF')
-          );
+          message.info('PDF printing is temporarily unavailable while safety checks are completed.');
         }
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [billType, items, customer, payment, submittedInvoice]);
+  }, [billType, items, customer, payment, submittedInvoice, locked, isSubmitting, billing.review]);
 
   // ───── Product selected → add item, focus qty ─────
   const handleProductSelect = useCallback((product) => {
@@ -160,8 +150,8 @@ export default function BillingPage() {
       // Check if product already in items
       const existingIdx = items.findIndex(i => i.product_id === product.id);
       if (existingIdx >= 0) {
-        updateItem(existingIdx, 'qty', (items[existingIdx].qty || 0) + 1);
-        message.info(`${product.name} qty increased to ${(items[existingIdx].qty || 0) + 1}`);
+        updateItem(existingIdx, 'qty', quantityIncrement(items[existingIdx].qty || '0'));
+        message.info(`${product.name} qty increased to ${quantityIncrement(items[existingIdx].qty || '0')}`);
         return;
       }
       const newIndex = addItem(product);
@@ -227,93 +217,30 @@ export default function BillingPage() {
 
   // ───── Submit ─────
   const handleSubmit = async () => {
-    // Pass overrides for quickbill to avoid React state batching issues
-    const overrides = {};
-    if (billType === 'quickbill') {
-      overrides.billType = 'quickbill';
-      // Always set customer for quickbill — null clears stale customer state
-      overrides.customer = walkinName.trim() ? { name: walkinName.trim() } : null;
-    }
-
-    const result = await submitInvoice(overrides);
-    if (result) {
-      // ───── Auto-save changed dynamic prices ─────
-      if (autoSavePrices) {
-        const updates = items.map((item, idx) => {
-          const defaultRate = defaultRates[idx];
-          if (defaultRate !== undefined && item.rate !== defaultRate) {
-            const payload = billType === 'wholesale' 
-              ? { wholesale_price: item.rate } 
-              : { mrp: item.rate };
-            return updateProduct(item.product_id, payload).catch(e => console.error('Failed updating price for', item.product_id, e));
-          }
-          return null;
-        }).filter(Boolean);
-
-        if (updates.length > 0) {
-          Promise.all(updates).then(() => {
-            message.success('Master prices updated according to bill changes.');
-          });
-        }
-      }
-
-      message.success(`Invoice ${result.invoice_no || result.invoice_id} created!`);
-      setSubmittedInvoice(result);
-      setShowSuccessModal(true);
-      startPdfPolling(result.invoice_id);
-    }
+    const overrides = billType === 'quickbill'
+      ? { billType: 'quickbill', customer: customer?.id ? customer : walkinName.trim() ? {name:walkinName.trim()} : null }
+      : {};
+    await submitInvoice(overrides);
   };
-
-  // ───── PDF polling ─────
-  const startPdfPolling = (invoiceId) => {
-    setPdfReady(false);
-    setPdfPolling(true);
-    let attempts = 0;
-
-    pdfPollRef.current = setInterval(async () => {
-      attempts++;
-      try {
-        const { data } = await getPdfStatus(invoiceId);
-        if (data.data?.pdf_status === 'ready' || data.data?.pdf_url) {
-          clearInterval(pdfPollRef.current);
-          setPdfReady(true);
-          setPdfPolling(false);
-        }
-      } catch {
-        // PDF service might not exist yet — stop after 10 attempts
-      }
-      if (attempts >= 10) {
-        clearInterval(pdfPollRef.current);
-        setPdfPolling(false);
-      }
-    }, 2000);
-  };
-
   useEffect(() => {
-    return () => {
-      if (pdfPollRef.current) clearInterval(pdfPollRef.current);
-    };
-  }, []);
+    if(invoiceResult) { setSubmittedInvoice(invoiceResult); setShowSuccessModal(true); }
+  },[invoiceResult]);
 
   // ───── Close success modal and reset ─────
-  const handleModalClose = () => {
-    if (pdfPollRef.current) clearInterval(pdfPollRef.current);
+  const handleModalClose = async () => {
+    if(!await resetBilling()) return;
     setShowSuccessModal(false);
     setSubmittedInvoice(null);
-    setPdfReady(false);
-    setPdfPolling(false);
     setWalkinName('');
     setPayModeSelected('cash');
     setPayModeAmount(0);
     setPayModeRef('');
     setDefaultRates({});
-    setAutoSavePrices(false);
-    resetBilling();
   };
 
   // ───── Handle "Pay Full" convenience ─────
   const handlePayFull = () => {
-    setPaymentAmount(totals.grand_total);
+    setFullPayment(totals.grand_total,payModeSelected);
   };
 
   // ───── Add payment mode entry ─────
@@ -323,7 +250,7 @@ export default function BillingPage() {
       return;
     }
     addPaymentMode(payModeSelected, payModeAmount, payModeRef);
-    const totalModeAmount = payment.modes.reduce((s, m) => s + m.amount, 0) + payModeAmount;
+    const totalModeAmount = moneySum([...payment.modes.map(m=>m.amount),payModeAmount]);
     setPaymentAmount(totalModeAmount);
     setPayModeAmount(0);
     setPayModeRef('');
@@ -331,33 +258,9 @@ export default function BillingPage() {
 
   // ───── Unit conversion change handler ─────
   const handleUnitChange = useCallback((idx, value, item) => {
-    const baseUnit = item.base_unit;
-    if (value === baseUnit) {
-      // Revert to base unit
-      updateItemFields(idx, {
-        alt_unit: null,
-        alt_qty: null,
-        base_qty: null,
-        selected_unit: null,
-        _conversionValue: null,
-      });
-    } else {
-      const rawConv = unitConversionsCache.current[item.product_id];
-      const conversions = Array.isArray(rawConv) ? rawConv : [];
-      const conv = conversions.find(c => c.unit_name === value);
-      if (conv) {
-        const cvValue = parseFloat(conv.conversion_value);
-        const altQty = item.qty;
-        const baseQty = parseFloat((altQty * cvValue).toFixed(4));
-        updateItemFields(idx, {
-          selected_unit: value,
-          alt_unit: value,
-          alt_qty: altQty,
-          base_qty: baseQty,
-          _conversionValue: cvValue,
-        });
-      }
-    }
+    const conv = (unitConversionsCache.current[item.product_id] || []).find(c => c.unit_name === value && c.is_sales_unit);
+    updateItemFields(idx,{unit:value,selected_unit:value,rate:'',discount_amount:'0.00',discount_pct:'0.00',_conversionValue:value===item.base_unit ? '1' : conv?.conversion_value || '1',alt_unit:value===item.base_unit ? null : value});
+    message.info(`Enter the selling rate per ${value}.`);
   }, [updateItemFields]);
 
   // ───── Stock error display ─────
@@ -379,7 +282,7 @@ export default function BillingPage() {
       className: 'col-product',
       render: (name, record) => (
         <div className="product-cell">
-          <span className="product-name">{name}</span>
+          <span className="product-name">{name}</span>{record.preview_error && <Text type="danger">{record.preview_error}</Text>}
           {record.hsn_snapshot && (
             <span className="product-hsn">HSN: {record.hsn_snapshot}</span>
           )}
@@ -393,11 +296,14 @@ export default function BillingPage() {
       render: (val, record, idx) => (
         <div>
           <InputNumber
+            stringMode
+            disabled={locked}
             ref={(el) => { qtyInputRefs.current[idx] = el; }}
             className="billing-qty-input"
+            precision={3}
             min={0.001}
             value={val}
-            onChange={(v) => updateItem(idx, 'qty', v || 1)}
+            onChange={(v) => updateItem(idx, 'qty', v ?? '')}
             onKeyDown={(e) => handleQtyKeyDown(e, idx)}
             onFocus={(e) => e.target.select()}
             size="small"
@@ -423,9 +329,9 @@ export default function BillingPage() {
         const options = conversions.length > 0
           ? [
               { label: bUnit, value: bUnit },
-              ...conversions.map(c => ({ label: c.unit_name, value: c.unit_name })),
+              ...conversions.filter(c=>c.is_sales_unit && c.unit_name!==bUnit).map(c => ({ label: c.unit_name, value: c.unit_name })),
             ]
-          : HARDWARE_UNITS.map(u => ({ label: u, value: u }));
+          : [{label:bUnit,value:bUnit}];
 
         return (
           <Select
@@ -433,13 +339,7 @@ export default function BillingPage() {
             value={record.selected_unit || bUnit}
             options={options}
             showSearch
-            onChange={(val) => {
-              if (conversions.length > 0) {
-                handleUnitChange(idx, val, record);
-              } else {
-                updateItem(idx, 'unit', val);
-              }
-            }}
+            onChange={(val) => handleUnitChange(idx, val, record)}
             style={{ width: '100%' }}
             popupMatchSelectWidth={false}
           />
@@ -447,7 +347,7 @@ export default function BillingPage() {
       },
     },
     {
-      title: 'Rate',
+      title: 'Rate / selected unit',
       dataIndex: 'rate',
       width: 100,
       render: (val, _, idx) => {
@@ -455,12 +355,15 @@ export default function BillingPage() {
         return (
           <div style={{ position: 'relative' }}>
             <InputNumber
+            stringMode
+            precision={2}
+            disabled={locked}
               ref={(el) => { rateInputRefs.current[idx] = el; }}
               className="billing-rate-input"
               min={0}
               step={0.5}
               value={val}
-              onChange={(v) => updateItem(idx, 'rate', v || 0)}
+              onChange={(v) => updateItem(idx, 'rate', v ?? '')}
               onKeyDown={(e) => handleRateKeyDown(e, idx)}
               onFocus={(e) => e.target.select()}
               size="small"
@@ -475,44 +378,16 @@ export default function BillingPage() {
       },
     },
     {
-      title: 'D%',
-      dataIndex: 'discount_pct',
-      width: 62,
-      render: (val, _, idx) => (
-        <InputNumber
-          ref={(el) => { discInputRefs.current[idx] = el; }}
-          className="billing-disc-input"
-          min={0}
-          max={100}
-          value={val}
-          onChange={(v) => updateItem(idx, 'discount_pct', v || 0)}
-          onKeyDown={(e) => handleDiscKeyDown(e, idx)}
-          onFocus={(e) => e.target.select()}
-          size="small"
-          style={{ width: '100%' }}
-        />
-      ),
+      title: 'Discount / unit', width: 120,
+      render: (_, record, idx) => <Space direction="vertical" size={2}>
+        <Select size="small" value={record.discount_kind || 'pct'} disabled={locked} options={[{value:'pct',label:'Percent'},{value:'amount',label:'Fixed / unit'}]}
+          onChange={kind=>updateItemFields(idx,{discount_kind:kind,discount_pct:'0.00',discount_amount:'0.00'})}/>
+        <InputNumber className="billing-disc-input" stringMode precision={2} min="0" disabled={locked}
+          value={record.discount_kind==='amount' ? record.discount_amount : record.discount_pct}
+          onChange={value=>updateItem(idx,record.discount_kind==='amount' ? 'discount_amount' : 'discount_pct',value || '0')}/>
+      </Space>,
     },
-    {
-      title: 'GST%',
-      dataIndex: 'gst_pct',
-      width: 62,
-      render: (val, _, idx) => (
-        <InputNumber
-          ref={(el) => { gstInputRefs.current[idx] = el; }}
-          className="billing-gst-input"
-          size="small"
-          min={0}
-          max={100}
-          step={1}
-          value={val}
-          onChange={(v) => updateItem(idx, 'gst_pct', v ?? 0)}
-          onKeyDown={handleGstKeyDown}
-          onFocus={(e) => e.target.select()}
-          style={{ width: '100%' }}
-        />
-      ),
-    },
+    {title:'GST (catalog)',dataIndex:'gst_pct',width:90,render:value=>`${value}%`},
     {
       title: 'Amount',
       dataIndex: 'line_total',
@@ -539,13 +414,14 @@ export default function BillingPage() {
 
   return (
     <div className="billing-page">
+      <InvoiceReview billing={billing}/>
       {/* Keyboard shortcuts bar */}
       <div className="shortcuts-bar">
         <span className="shortcut-item"><span className="shortcut-key">F2</span> Quick Bill</span>
         <span className="shortcut-item"><span className="shortcut-key">F9</span> Finalize</span>
         <span className="shortcut-item"><span className="shortcut-key">F4</span> Pay Full</span>
         <span className="shortcut-item"><span className="shortcut-key">Esc</span> Clear</span>
-        <span className="shortcut-item"><span className="shortcut-key">Tab</span> Qty→Rate→Disc→GST→Search</span>
+        <span className="shortcut-item">Rates and fixed discounts are per selected selling unit</span>
         <span className="shortcut-item"><span className="shortcut-key">Ctrl+P</span> Print</span>
       </div>
 
@@ -556,11 +432,12 @@ export default function BillingPage() {
           <Card size="small" className="billing-card">
             <Row gutter={12} align="middle">
               <Col flex="auto">
-                {billType === 'quickbill' ? (
+                {billType === 'quickbill' && !customer?.id ? (
                   <Input
+                    disabled={locked}
                     placeholder="Walk-in customer name (optional)"
                     value={walkinName}
-                    onChange={(e) => setWalkinName(e.target.value)}
+                    onChange={(e) => {billing.draftChanged();setWalkinName(e.target.value);}}
                     size="large"
                     prefix={<Text type="secondary">Walk-in:</Text>}
                   />
@@ -595,10 +472,10 @@ export default function BillingPage() {
                             autoFocus={true}
                           />
                         </div>
-                        <Button 
-                          icon={<PlusOutlined />} 
+                        <Button
+                          icon={<PlusOutlined />}
                           title="Quick Add Customer"
-                          onClick={() => setShowCustomerModal(true)} 
+                          onClick={() => setShowCustomerModal(true)}
                         />
                       </div>
                     )}
@@ -608,6 +485,7 @@ export default function BillingPage() {
               <Col>
                 <Radio.Group
                   value={billType}
+                  disabled={locked}
                   onChange={(e) => setBillType(e.target.value)}
                   size="small"
                   buttonStyle="solid"
@@ -636,10 +514,10 @@ export default function BillingPage() {
                   placeholder="Search product by name, code, or barcode..."
                 />
               </div>
-              <Button 
-                icon={<PlusOutlined />} 
+              <Button
+                icon={<PlusOutlined />}
                 title="Quick Add Product"
-                onClick={() => setShowProductModal(true)} 
+                onClick={() => setShowProductModal(true)}
               />
             </div>
           </Card>
@@ -733,10 +611,13 @@ export default function BillingPage() {
               <Row gutter={8} align="middle">
                 <Col flex="auto">
                   <InputNumber
+            stringMode
+            precision={2}
+            disabled={locked}
                     value={payment.amount_paid}
                     onChange={(v) => setPaymentAmount(v || 0)}
                     min={0}
-                    max={totals.grand_total * 2}
+                    max={totals.grand_total}
                     style={{ width: '100%' }}
                     size="large"
                     prefix={<Text type="secondary">Paid</Text>}
@@ -800,6 +681,9 @@ export default function BillingPage() {
             <Row gutter={8} style={{ marginBottom: 8 }}>
               <Col span={10}>
                 <InputNumber
+            stringMode
+            precision={2}
+            disabled={locked}
                   placeholder="Amount"
                   value={payModeAmount}
                   onChange={(v) => setPayModeAmount(v || 0)}
@@ -844,7 +728,7 @@ export default function BillingPage() {
                       onClick={() => {
                         removePaymentMode(i);
                         const remaining = payment.modes.filter((_, idx) => idx !== i);
-                        const totalRemaining = remaining.reduce((s, pm) => s + pm.amount, 0);
+                        const totalRemaining = moneySum(remaining.map(pm=>pm.amount));
                         setPaymentAmount(totalRemaining);
                       }}
                     />
@@ -854,7 +738,7 @@ export default function BillingPage() {
             )}
 
             {/* Due date for partial/unpaid */}
-            {balanceDue > 0 && billType !== 'quickbill' && (
+            {balanceDue > 0 && customer?.id && (
               <div style={{ marginTop: 12 }}>
                 <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
                   Due Date (required)
@@ -893,7 +777,7 @@ export default function BillingPage() {
               className="billing-finalize-btn"
               loading={isSubmitting}
               onClick={handleSubmit}
-              disabled={items.length === 0}
+              disabled={items.length === 0 || locked}
             >
               {isSubmitting ? 'Creating Invoice...' : 'Finalise Bill (F9)'}
             </Button>
@@ -901,19 +785,14 @@ export default function BillingPage() {
 
           <Row gutter={8} align="middle">
             <Col flex="auto">
-              <Checkbox
-                checked={autoSavePrices}
-                onChange={(e) => setAutoSavePrices(e.target.checked)}
-                style={{ fontSize: 11 }}
-              >
-                <Text type="secondary" style={{ fontSize: 11 }}>Auto-save rates</Text>
-              </Checkbox>
+
             </Col>
             <Col>
               <Button
                 size="small"
                 type="text"
                 danger
+                disabled={locked}
                 onClick={() => {
                   if (items.length > 0) {
                     Modal.confirm({
@@ -921,14 +800,13 @@ export default function BillingPage() {
                       content: 'All items and payment info will be lost.',
                       okText: 'Clear',
                       okType: 'danger',
-                      onOk: () => {
-                        resetBilling();
+                      onOk: async () => {
+                        if(!await resetBilling()) return;
                         setWalkinName('');
                         setPayModeAmount(0);
                         setPayModeRef('');
                         setDefaultRates({});
-                        setAutoSavePrices(false);
-                      },
+                                          },
                     });
                   } else {
                     resetBilling();
@@ -993,36 +871,7 @@ export default function BillingPage() {
             <Divider />
 
             <Space>
-              {pdfPolling && (
-                <Button icon={<Spin size="small" />} disabled>
-                  Generating PDF...
-                </Button>
-              )}
-              {pdfReady && (
-                <Button
-                  type="primary"
-                  icon={<PrinterOutlined />}
-                  onClick={() => {
-                    openInvoicePdf(submittedInvoice.invoice_id).catch(() =>
-                      message.error('Failed to open PDF')
-                    );
-                  }}
-                >
-                  Print / Download PDF
-                </Button>
-              )}
-              {!pdfPolling && !pdfReady && (
-                <Button
-                  icon={<PrinterOutlined />}
-                  onClick={() => {
-                    openInvoicePdf(submittedInvoice.invoice_id).catch(() =>
-                      message.error('Failed to open PDF')
-                    );
-                  }}
-                >
-                  Try Print
-                </Button>
-              )}
+              <Button disabled icon={<PrinterOutlined />}>PDF unavailable</Button>
               <Button type="primary" onClick={handleModalClose}>
                 New Bill
               </Button>

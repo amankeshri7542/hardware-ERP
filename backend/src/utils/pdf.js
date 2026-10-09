@@ -1,9 +1,15 @@
 // hardware-erp/backend/src/utils/pdf.js
-// Generate invoice PDF with Puppeteer. Runs in worker.js, NEVER in server.js.
+// Pure escaped HTML formatting retained for regression tests; PDF rendering is contained.
 
 const fs = require('fs');
 const path = require('path');
-const puppeteer = require('puppeteer');
+const { disabledDocumentError } = require('./documentContainment');
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[char]));
+}
 
 const TEMPLATE_DIR = path.join(__dirname, '..', 'templates');
 
@@ -144,14 +150,14 @@ function buildItemRows(items, hasAltQty) {
     .map(
       (item) => {
         const qtyString = item.alt_qty && item.alt_unit
-          ? `${item.alt_qty} ${item.alt_unit} <br><small style="color:#666">(${item.base_qty || item.quantity} ${item.unit})</small>`
-          : `${item.quantity} ${item.unit}`;
+          ? `${escapeHtml(item.alt_qty)} ${escapeHtml(item.alt_unit)} <br><small style="color:#666">(${escapeHtml(item.base_qty || item.quantity)} ${escapeHtml(item.unit)})</small>`
+          : `${escapeHtml(item.quantity)} ${escapeHtml(item.unit)}`;
         
         return `
     <tr>
-      <td>${item.sr_no}</td>
-      <td class="left">${item.product_name || ''}</td>
-      <td>${item.hsn_code || ''}</td>
+      <td>${escapeHtml(item.sr_no)}</td>
+      <td class="left">${escapeHtml(item.product_name || '')}</td>
+      <td>${escapeHtml(item.hsn_code || '')}</td>
       <td>${qtyString}</td>
       <td class="right">${formatCurrency(item.rate)}</td>
       <td>${parseFloat(item.discount_pct) || 0}%</td>
@@ -171,12 +177,12 @@ function buildThermalItemRows(items) {
   return items
     .map((item) => {
       const qtyLine = item.alt_qty && item.alt_unit
-        ? `${item.alt_qty} ${item.alt_unit} (${item.base_qty || item.quantity} ${item.unit})`
-        : `${item.quantity} ${item.unit}`;
+        ? `${escapeHtml(item.alt_qty)} ${escapeHtml(item.alt_unit)} (${escapeHtml(item.base_qty || item.quantity)} ${escapeHtml(item.unit)})`
+        : `${escapeHtml(item.quantity)} ${escapeHtml(item.unit)}`;
 
       return `
 <div class="item-row">
-  <div class="item-name">${item.product_name || ''}</div>
+  <div class="item-name">${escapeHtml(item.product_name || '')}</div>
   <div class="item-calc">
     <span>${qtyLine} x ${formatCurrency(item.rate)}</span>
     <span>${formatCurrency(item.total)}</span>
@@ -209,10 +215,11 @@ function buildGstSummaryRows(items) {
 /**
  * Replace {{mustache}} placeholders with data values.
  */
-function replacePlaceholders(html, data) {
+function replacePlaceholders(html, data, itemRowsHtml) {
   return html.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+    if (key === 'ITEM_ROWS') return itemRowsHtml;
     if (key in data) {
-      return data[key];
+      return escapeHtml(data[key]);
     }
     return '';
   });
@@ -224,8 +231,11 @@ function replacePlaceholders(html, data) {
  * @param {object} options - optional: { template: 'invoice-a4' | 'invoice-thermal' }
  * @returns {Promise<Buffer>} PDF buffer
  */
-async function generateInvoicePDF(invoiceData, options = {}) {
+function renderInvoiceHtml(invoiceData, options = {}) {
   const templateName = options.template || 'invoice-a4';
+  if (!['invoice-a4', 'invoice-thermal'].includes(templateName)) {
+    throw new Error('Unknown invoice template');
+  }
   const templatePath = path.join(TEMPLATE_DIR, `${templateName}.html`);
 
   // Read the HTML template
@@ -239,20 +249,6 @@ async function generateInvoicePDF(invoiceData, options = {}) {
   const itemRowsHtml = isThermalTemplate
     ? buildThermalItemRows(invoiceData.items || [])
     : buildItemRows(invoiceData.items || [], hasAltQty);
-  const gstSummaryRowsHtml = buildGstSummaryRows(invoiceData.items || []);
-
-  // Replace items block — supports both {{#items}}...{{/items}} and {{ITEM_ROWS}}
-  html = html.replace(
-    /\{\{#items\}\}[\s\S]*?\{\{\/items\}\}/,
-    itemRowsHtml
-  );
-  html = html.replace('{{ITEM_ROWS}}', itemRowsHtml);
-
-  // Replace GST summary block
-  html = html.replace(
-    /\{\{#gstSummary\}\}[\s\S]*?\{\{\/gstSummary\}\}/,
-    gstSummaryRowsHtml
-  );
 
   // Calculate CGST and SGST (half of total GST each for intra-state)
   const totalGst = parseFloat(invoiceData.total_gst) || 0;
@@ -309,55 +305,17 @@ async function generateInvoicePDF(invoiceData, options = {}) {
     dueDate: formatDate(invoiceData.due_date),
   };
 
-  html = replacePlaceholders(html, templateData);
+  return replacePlaceholders(html, templateData, itemRowsHtml);
+}
 
-  // Determine PDF options based on template
-
-  // Launch Puppeteer and generate PDF
-  // --disable-gpu + --no-zygote: required when running headless inside a systemd/PM2 service
-  // --disable-dev-shm-usage: avoids /dev/shm too small on low-memory VMs (t2.micro)
-  const launchOptions = {
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-zygote',
-      '--no-first-run',
-    ],
-  };
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
-  const browser = await puppeteer.launch(launchOptions);
-
-  try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-
-    const pdfOptions = isThermalTemplate
-      ? {
-          width: '80mm',
-          printBackground: true,
-          margin: { top: '2mm', right: '2mm', bottom: '2mm', left: '2mm' },
-        }
-      : {
-          format: 'A4',
-          printBackground: true,
-          margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' },
-        };
-
-    const pdfBuffer = await page.pdf(pdfOptions);
-
-    return Buffer.from(pdfBuffer);
-  } finally {
-    await browser.close();
-  }
+// No renderer is available until sandbox, network and resource isolation are verified.
+async function generateInvoicePDF() {
+  throw disabledDocumentError('PDF');
 }
 
 module.exports = {
   generateInvoicePDF,
+  renderInvoiceHtml,
   numberToWords,
   formatCurrency,
   formatDate,

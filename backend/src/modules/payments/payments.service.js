@@ -1,4 +1,7 @@
 const { pool } = require('../../config/db');
+const { decimal, format, fail } = require('../../utils/financial');
+const { withIdempotency } = require('../../utils/idempotency');
+const { normalizePaymentIntent, postPayment } = require('./paymentPosting');
 
 // ─── Column lists (no SELECT *) ───────────────────────────────────
 
@@ -24,104 +27,71 @@ const PAYMENT_CUSTOMER_COLUMNS = `
 
 // ─── recordPayment (atomic transaction) ───────────────────────────
 
-async function recordPayment(data, userId) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+async function requireReconciledInvoice(client, invoiceId) {
+  // Compare exact PostgreSQL numerics. Historical rows are evidence, never repaired here.
+  const { rows: [history] } = await client.query(`
+    SELECT i.amount_paid >= 0 AND i.balance_due >= 0
+      AND i.amount_paid + i.balance_due = i.grand_total
+      AND (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id=i.id) = i.amount_paid
+      AND (SELECT COALESCE(SUM(l.debit),0) FROM customer_ledger l
+           WHERE l.reference_type='invoice' AND l.reference_id=i.id) = i.grand_total
+      AND NOT EXISTS (
+        SELECT 1 FROM customer_ledger l WHERE l.reference_type='invoice' AND l.reference_id=i.id
+          AND (l.customer_id IS DISTINCT FROM i.customer_id OR l.entry_type <> 'invoice' OR l.credit <> 0 OR l.debit <= 0))
+      AND NOT EXISTS (
+        SELECT 1 FROM payments p WHERE p.invoice_id=i.id AND (
+          p.customer_id IS DISTINCT FROM i.customer_id OR p.amount <= 0
+          OR p.mode NOT IN ('cash','upi','bank','cheque','mixed')
+          OR (SELECT COALESCE(SUM(l.credit),0) FROM customer_ledger l
+              WHERE l.reference_type='payment' AND l.reference_id=p.id) <> p.amount
+          OR EXISTS (SELECT 1 FROM customer_ledger l WHERE l.reference_type='payment' AND l.reference_id=p.id
+              AND (l.customer_id IS DISTINCT FROM i.customer_id OR l.entry_type <> 'payment' OR l.debit <> 0 OR l.credit <= 0))
+          OR EXISTS (SELECT 1 FROM payment_modes_detail d WHERE d.payment_id=p.id
+              AND (d.amount <= 0 OR d.mode NOT IN ('cash','upi','bank','cheque') OR (p.mode <> 'mixed' AND d.mode <> p.mode)))
+          OR ((p.mode='mixed' OR EXISTS (SELECT 1 FROM payment_modes_detail d WHERE d.payment_id=p.id))
+              AND (SELECT COALESCE(SUM(d.amount),0) FROM payment_modes_detail d WHERE d.payment_id=p.id) <> p.amount)
+        )) AS reconciled
+    FROM invoices i WHERE i.id=$1`, [invoiceId]);
+  if (!history?.reconciled) fail('INVOICE_RECONCILIATION_REQUIRED');
+}
 
-    // Step 1: If invoice_id provided, validate and update invoice
-    if (data.invoice_id) {
-      const invResult = await client.query(
-        `SELECT id, customer_id, balance_due, amount_paid, grand_total, status
-         FROM invoices WHERE id = $1 FOR UPDATE`,
-        [data.invoice_id]
-      );
-
-      if (!invResult.rows[0]) {
-        throw { statusCode: 404, message: 'Invoice not found', errorCode: 'INVOICE_NOT_FOUND' };
-      }
-
-      if (invResult.rows[0].customer_id !== data.customer_id) {
-        throw { statusCode: 422, message: 'Invoice does not belong to this customer', errorCode: 'INVOICE_CUSTOMER_MISMATCH' };
-      }
-
-      const inv = invResult.rows[0];
-      const currentBalance = parseFloat(inv.balance_due) || 0;
-      if (currentBalance <= 0) {
-        throw { statusCode: 422, message: 'Invoice is already fully paid', errorCode: 'INVOICE_ALREADY_PAID' };
-      }
-      if (data.amount > currentBalance) {
-        throw { statusCode: 422, message: `Payment amount (${data.amount}) exceeds balance due (${currentBalance})`, errorCode: 'PAYMENT_EXCEEDS_BALANCE' };
-      }
-      const newBalanceDue = Math.max(0, parseFloat((currentBalance - data.amount).toFixed(2)));
-      const newAmountPaid = parseFloat((parseFloat(inv.amount_paid) + data.amount).toFixed(2));
-      const newStatus = newBalanceDue === 0 ? 'paid' : 'partial';
-
-      await client.query(
-        `UPDATE invoices SET balance_due = $1, amount_paid = $2, status = $3 WHERE id = $4`,
-        [newBalanceDue, newAmountPaid, newStatus, data.invoice_id]
-      );
+async function recordPayment(data, userId, key) {
+  const intent = normalizePaymentIntent(data);
+  return withIdempotency({ actorId: userId, operation: 'payment.create', key, intent }, async (client) => {
+    let invoice;
+    const amount = decimal(intent.payment.amount, 2, 'payment amount', { min: 1n });
+    if (intent.invoice_id !== null) {
+      const result = await client.query(
+        'SELECT id,customer_id,grand_total,amount_paid,balance_due FROM invoices WHERE id=$1 FOR UPDATE',
+        [intent.invoice_id]);
+      invoice = result.rows[0];
+      if (!invoice) fail('INVOICE_NOT_FOUND', 404);
+      if (invoice.customer_id !== intent.customer_id) fail('INVOICE_CUSTOMER_MISMATCH');
+      if (decimal(invoice.grand_total, 2, 'invoice total') <= 0n) fail('INVOICE_NOT_PAYABLE');
+      const due = decimal(invoice.balance_due, 2, 'invoice balance');
+      if (due === 0n) fail('INVOICE_ALREADY_PAID');
+      if (amount > due) fail('PAYMENT_EXCEEDS_BALANCE');
     }
-
-    // Step 2: INSERT payment
-    const payResult = await client.query(
-      `INSERT INTO payments
-         (customer_id, invoice_id, amount, mode, payment_date, reference_no, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, customer_id, invoice_id, amount, mode, payment_date, reference_no, notes, created_at`,
-      [
-        data.customer_id,
-        data.invoice_id || null,
-        data.amount,
-        data.mode,
-        data.payment_date,
-        data.reference_no || null,
-        data.notes || null,
-        userId,
-      ]
-    );
-    const payment = payResult.rows[0];
-
-    // Step 3: Mixed payment modes detail
-    if (data.mode === 'mixed' && Array.isArray(data.modes_detail)) {
-      for (const md of data.modes_detail) {
-        await client.query(
-          `INSERT INTO payment_modes_detail (payment_id, mode, amount, reference_no)
-           VALUES ($1, $2, $3, $4)`,
-          [payment.id, md.mode, md.amount, md.reference_no || null]
-        );
-      }
+    const customer = await client.query(
+      'SELECT id FROM customers WHERE id=$1 AND is_active=true FOR UPDATE', [intent.customer_id]);
+    if (!customer.rowCount) fail('CUSTOMER_NOT_FOUND', 404);
+    let invoiceBalances;
+    if (invoice) {
+      await requireReconciledInvoice(client, invoice.id);
+      const balance = decimal(invoice.balance_due, 2, 'invoice balance') - amount;
+      const paid = decimal(invoice.amount_paid, 2, 'invoice paid') + amount;
+      decimal(format(paid), 2, 'invoice paid');
+      invoiceBalances = (await client.query(
+        `UPDATE invoices SET balance_due=$1,amount_paid=$2,status=$3 WHERE id=$4
+         RETURNING balance_due AS invoice_balance_due,amount_paid AS invoice_amount_paid`,
+        [format(balance), format(paid), balance === 0n ? 'paid' : 'partial', invoice.id])).rows[0];
     }
-
-    // Step 4: Customer ledger entry
-    const entryType = data.invoice_id ? 'payment' : 'advance';
-    const description = data.invoice_id
-      ? 'Payment received: ' + data.mode + (data.reference_no ? ' (' + data.reference_no + ')' : '')
-      : 'Advance payment: ' + data.mode + (data.reference_no ? ' (' + data.reference_no + ')' : '');
-
-    await client.query(
-      `INSERT INTO customer_ledger
-         (customer_id, date, entry_type, reference_id, reference_type, debit, credit, balance, description)
-       VALUES ($1, $2, $3, $4, 'payment', 0, $5, 0, $6)`,
-      [data.customer_id, data.payment_date, entryType, payment.id, data.amount, description]
-    );
-    // Note: the trigger fn_sync_customer_outstanding automatically updates customers.outstanding_balance
-
-    // Fetch the updated outstanding balance from the customer (calculated by trigger)
-    const { rows: custResult } = await client.query(
-      `SELECT outstanding_balance FROM customers WHERE id = $1`,
-      [data.customer_id]
-    );
-    payment.outstanding_balance = parseFloat(custResult[0].outstanding_balance);
-
-    await client.query('COMMIT');
-    return payment;
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* ignore rollback error */ }
-    throw err;
-  } finally {
-    client.release();
-  }
+    const receipt = await postPayment(client, {
+      customerId: intent.customer_id, invoiceId: intent.invoice_id, payment: intent.payment,
+      paymentDate: intent.payment_date, notes: intent.notes, userId,
+    });
+    return { status: 201, body: { success: true, data: { ...receipt, ...invoiceBalances } } };
+  });
 }
 
 // ─── getPaymentsByCustomer ────────────────────────────────────────

@@ -1,211 +1,89 @@
-import { useState, useCallback, useMemo } from 'react';
-import { calculateLineItem, calculateInvoiceTotals, getPaymentStatus } from '../utils/billing.calculations';
-import { createInvoice } from '../api/invoices.api';
+import { useState, useCallback, useMemo, useRef } from 'react';
+import { calculateLineItem, calculateInvoiceTotals, getPaymentStatus, decimal, moneyDifference, moneySum, scaled } from '../utils/billing.calculations.js';
+import { createInvoice, quoteInvoice } from '../api/invoices.api.js';
+import { financialError } from '../utils/financialIntent.js';
+import { useFinancialMutation } from './useFinancialMutation.js';
+const emptyPayment = () => ({amount_paid:'0.00',modes:[],due_date:null});
+export const localDate = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; };
 
 export function useBilling(initialBillType = 'retail') {
-  const [customer, setCustomerState] = useState(null);
-  const [billType, setBillType] = useState(initialBillType);
-  const [items, setItems] = useState([]);
-  const [payment, setPayment] = useState({
-    amount_paid: 0,
-    modes: [],
-    due_date: null,
-  });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errors, setErrors] = useState({});
-
-  // When customer is set, auto-set billType
-  const setCustomer = useCallback((cust) => {
-    setCustomerState(cust);
-    if (cust && cust.type === 'wholesale') {
-      setBillType('wholesale');
-    } else if (cust) {
-      setBillType('retail');
-    }
-  }, []);
-
-  // Add item from ProductSearch onSelect — returns the new item's index
-  const addItem = useCallback((product) => {
-    const mrp = parseFloat(product.mrp) || 0;
-    const wholesalePrice = parseFloat(product.wholesale_price) || mrp;
-    const newItem = {
-      product_id: product.id,
-      product_name_snapshot: product.name || 'Unknown Product',
-      hsn_snapshot: product.hsn_code || '',
-      qty: 1,
-      unit: product.unit || product.base_unit || 'piece',
-      base_unit: product.base_unit || product.unit || 'piece',
-      rate: billType === 'wholesale' ? (wholesalePrice || mrp) : mrp,
-      discount_pct: 0,
-      discount_amount: 0,
-      gst_pct: parseFloat(product.gst_rate) || 0,
-      cost_price_snapshot: parseFloat(product.purchase_price) || 0,
-    };
-    const computed = calculateLineItem(newItem);
-    // Capture the current length before the state update — this is the new item's index
-    const newIndex = items.length;
-    setItems(prev => [...prev, computed]);
-    return newIndex;
-  }, [billType, items.length]);
-
-  // Update item field and recalculate
-  const updateItem = useCallback((index, field, value) => {
-    setItems(prev => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], [field]: value };
-
-      // If qty changed AND item has an active unit conversion, recalculate base_qty
-      if (field === 'qty' && updated[index].alt_unit && updated[index]._conversionValue) {
-        updated[index].alt_qty = value;
-        updated[index].base_qty = parseFloat((value * updated[index]._conversionValue).toFixed(4));
-      }
-
-      // Recalculate if discount_pct changed
-      if (field === 'discount_pct') {
-        updated[index].discount_amount = updated[index].rate * (value / 100);
-      }
-      updated[index] = calculateLineItem(updated[index]);
-      return updated;
-    });
-  }, []);
-
-  // Update multiple fields on an item at once (avoids multiple re-renders)
-  const updateItemFields = useCallback((index, fieldsObj) => {
-    setItems(prev => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], ...fieldsObj };
-      if ('discount_pct' in fieldsObj) {
-        updated[index].discount_amount = updated[index].rate * (fieldsObj.discount_pct / 100);
-      }
-      updated[index] = calculateLineItem(updated[index]);
-      return updated;
-    });
-  }, []);
-
-  const removeItem = useCallback((index) => {
-    setItems(prev => prev.filter((_, i) => i !== index));
-  }, []);
-
-  // Computed totals
-  const totals = useMemo(() => calculateInvoiceTotals(items), [items]);
-
-  const balanceDue = useMemo(() => {
-    return parseFloat((totals.grand_total - payment.amount_paid).toFixed(2));
-  }, [totals.grand_total, payment.amount_paid]);
-
-  const paymentStatus = useMemo(() => {
-    return getPaymentStatus(totals.grand_total, payment.amount_paid);
-  }, [totals.grand_total, payment.amount_paid]);
-
-  const setPaymentAmount = useCallback((amount) => {
-    setPayment(prev => ({ ...prev, amount_paid: amount }));
-  }, []);
-
-  const addPaymentMode = useCallback((mode, amount, reference_no) => {
-    setPayment(prev => ({
-      ...prev,
-      modes: [...prev.modes, { mode, amount, reference_no: reference_no || '' }],
-    }));
-  }, []);
-
-  const removePaymentMode = useCallback((index) => {
-    setPayment(prev => ({
-      ...prev,
-      modes: prev.modes.filter((_, i) => i !== index),
-    }));
-  }, []);
-
-  const setDueDate = useCallback((date) => {
-    setPayment(prev => ({ ...prev, due_date: date }));
-  }, []);
-
-  const submitInvoice = useCallback(async (overrides = {}) => {
-    setErrors({});
-
-    // Allow callers to override state values (avoids React state batching issues)
-    const effCustomer = 'customer' in overrides ? overrides.customer : customer;
-    const effBillType = overrides.billType || billType;
-    const effPayment = overrides.payment || payment;
-    const effBalanceDue = parseFloat((totals.grand_total - effPayment.amount_paid).toFixed(2));
-
-    // Validate
-    if (items.length === 0) {
-      setErrors({ items: 'At least one item required' });
-      return null;
-    }
-    if (effBillType !== 'quickbill' && !effCustomer) {
-      setErrors({ customer: 'Customer required for retail/wholesale bills' });
-      return null;
-    }
-    if (effBillType === 'quickbill' && !effCustomer && effBalanceDue > 0) {
-      setErrors({ customer: 'Walk-in customers must pay in full. Select or create a customer to allow dues.' });
-      return null;
-    }
-    if (effBalanceDue > 0 && !effPayment.due_date && effBillType !== 'quickbill') {
-      setErrors({ due_date: 'Due date required when balance is due' });
-      return null;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const payload = {
-        customer_id: effCustomer ? effCustomer.id : null,
-        customer_name_walkin: effBillType === 'quickbill' ? (effCustomer?.name || null) : null,
-        bill_type: effBillType,
-        date: new Date().toISOString().split('T')[0],
-        items: items.map(item => ({
-          product_id: item.product_id,
-          product_name_snapshot: item.product_name_snapshot,
-          hsn_snapshot: item.hsn_snapshot,
-          qty: item.qty,
-          unit: item.unit,
-          rate: item.rate,
-          discount_pct: item.discount_pct || 0,
-          discount_amount: item.discount_amount || 0,
-          gst_pct: item.gst_pct,
-          cost_price_snapshot: item.cost_price_snapshot,
-          ...(item.alt_unit ? {
-            alt_qty: item.alt_qty,
-            alt_unit: item.alt_unit,
-            base_qty: item.base_qty,
-          } : {}),
-        })),
-        payment: {
-          amount_paid: effPayment.amount_paid,
-          modes: effPayment.modes.length > 0 ? effPayment.modes :
-            (effPayment.amount_paid > 0 ? [{ mode: 'cash', amount: effPayment.amount_paid, reference_no: '' }] : []),
-          due_date: effPayment.due_date || null,
-        },
-      };
-      const { data } = await createInvoice(payload);
-      return data.data;
-    } catch (err) {
-      if (err.response?.data?.code === 'INSUFFICIENT_STOCK') {
-        setErrors({ stock: err.response.data.failures || err.response.data.error });
-      } else {
-        setErrors({ submit: err.response?.data?.error || 'Failed to create invoice' });
-      }
-      return null;
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [items, customer, billType, payment, totals.grand_total]);
-
-  const resetBilling = useCallback(() => {
-    setCustomerState(null);
-    setBillType('retail');
-    setItems([]);
-    setPayment({ amount_paid: 0, modes: [], due_date: null });
-    setErrors({});
-  }, []);
-
-  return {
-    customer, setCustomer,
-    billType, setBillType,
-    items, addItem, updateItem, updateItemFields, removeItem,
-    payment, setPaymentAmount, addPaymentMode, removePaymentMode, setDueDate,
-    isSubmitting, errors, setErrors,
-    totals, balanceDue, paymentStatus,
-    submitInvoice, resetBilling,
+  const mutation = useFinancialMutation('invoice',createInvoice);
+  const saved = mutation.intent?.snapshot;
+  const [customer,setCustomerState] = useState(saved?.customer || null);
+  const [billType,setBillTypeState] = useState(saved?.billType || initialBillType);
+  const [items,setItems] = useState(saved?.items || []);
+  const [payment,setPayment] = useState(saved?.payment || emptyPayment());
+  const [errors,setErrors] = useState({});
+  const [review,setReview] = useState(null);
+  const [quoting,setQuoting] = useState(false);
+  const revision = useRef(0);
+  const quoteLock = useRef(false);
+  const invalidate = () => { revision.current++; setReview(null); setErrors({}); };
+  const change = fn => { if (mutation.locked) return; invalidate(); fn(); };
+  const setCustomer = cust => change(() => { setCustomerState(cust); if(cust) setBillTypeState(cust.type === 'wholesale' ? 'wholesale' : 'retail'); });
+  const setBillType = value => change(() => setBillTypeState(value));
+  const preview = item => { try { return calculateLineItem(item); } catch(error) { return {...item,preview_error:error.message,gross_amount:'0.00',line_discount:'0.00',taxable_amount:'0.00',gst_amount:'0.00',line_total:'0.00'}; } };
+  const addItem = product => {
+    const index=items.length;
+    change(() => setItems(prev => [...prev,preview({product_id:product.id,product_name_snapshot:product.name,hsn_snapshot:product.hsn_code || '',qty:'1.000',
+      unit:product.base_unit || product.unit,base_unit:product.base_unit || product.unit,rate:decimal(billType==='wholesale' ? product.wholesale_price || product.mrp || '0' : product.mrp || '0'),
+      discount_kind:'pct',discount_pct:'0.00',discount_amount:'0.00',gst_pct:decimal(product.gst_rate || '0'),_conversionValue:'1'})]));
+    return index;
   };
+  const updateItemFields = (index,fields) => change(() => setItems(prev => prev.map((item,i) => i !== index ? item : preview({...item,preview_error:null,...fields}))));
+  const updateItem = (index,field,value) => updateItemFields(index,{[field]:value ?? ''});
+  const removeItem = index => change(() => setItems(prev => prev.filter((_,i) => i !== index)));
+  const totals = useMemo(() => calculateInvoiceTotals(items),[items]);
+  let balanceDue='0.00',paymentStatus='unpaid';
+  try { balanceDue=moneyDifference(totals.grand_total,payment.amount_paid || '0'); paymentStatus=getPaymentStatus(totals.grand_total,payment.amount_paid || '0'); } catch { /* Incomplete input is validated before quote. */ }
+  const setPaymentAmount = amount => change(() => setPayment(prev => ({...prev,amount_paid:amount ?? ''})));
+  const addPaymentMode = (mode,amount,reference_no='') => change(() => setPayment(prev => ({...prev,modes:[...prev.modes,{mode,amount,reference_no}]})));
+  const removePaymentMode = index => change(() => setPayment(prev => ({...prev,modes:prev.modes.filter((_,i) => i !== index)})));
+  const setFullPayment = (amount,mode='cash') => change(() => setPayment(prev=>({...prev,amount_paid:amount,modes:scaled(amount)>0n ? [{mode,amount,reference_no:''}] : []})));
+  const setDueDate = date => change(() => setPayment(prev => ({...prev,due_date:date})));
+  const submitInvoice = async (overrides = {}) => {
+    if(mutation.locked || quoteLock.current) return null;
+    setErrors({});
+    const effCustomer = Object.hasOwn(overrides,'customer') ? overrides.customer : customer;
+    const effType = overrides.billType || billType;
+    const effPayment = overrides.payment || payment;
+    if(!items.length) {setErrors({items:'Add at least one item'});return null;}
+    if(items.some(item=>item.preview_error)) {setErrors({items:'Correct the quantity, rate or discount shown in the items'});return null;}
+    if(effType !== 'quickbill' && !effCustomer?.id) {setErrors({customer:'Select a registered customer'});return null;}
+    quoteLock.current=true;setQuoting(true);
+    const version=revision.current;
+    try {
+      const canonicalPayment={amount_paid:decimal(effPayment.amount_paid || '0'),modes:effPayment.modes.map(mode=>({...mode,amount:decimal(mode.amount)})),due_date:effPayment.due_date || null};
+      if(moneySum(canonicalPayment.modes.map(mode=>mode.amount)) !== canonicalPayment.amount_paid) throw new Error('Payment methods must add up exactly to the amount paid. Add each tender below.');
+      const payload={customer_id:effCustomer?.id || null,customer_name_walkin:effType==='quickbill' && !effCustomer?.id ? effCustomer?.name || null : null,bill_type:effType,date:localDate(),
+        items:items.map(item=>({product_id:item.product_id,qty:decimal(item.qty,3),unit:item.unit,rate:decimal(item.rate),
+          ...(item.discount_kind==='amount' ? {discount_amount:decimal(item.discount_amount || '0')} : {discount_pct:decimal(item.discount_pct || '0')})})),payment:canonicalPayment};
+      const {data}=await quoteInvoice({...payload,payment:{amount_paid:'0.00',modes:[],due_date:null}});
+      if(revision.current !== version) {setErrors({submit:'The draft changed while totals were checked. Review it again.'});return null;}
+      const quote=data.data;
+      // Quick Bill explicitly reviews the full quoted cash/UPI amount before confirmation.
+      if(overrides.payFullMode) payload.payment={amount_paid:quote.totals.grand_total,modes:scaled(quote.totals.grand_total)>0n ? [{mode:overrides.payFullMode,amount:quote.totals.grand_total,reference_no:''}] : [],due_date:null};
+      const due=moneyDifference(quote.totals.grand_total,payload.payment.amount_paid);
+      if(scaled(payload.payment.amount_paid)>scaled(quote.totals.grand_total)) throw new Error('Payment exceeds the quoted total. Correct the tender before confirming.');
+      if(!payload.customer_id && due !== '0.00') throw new Error('Walk-in customers must pay the quoted total in full. Select a registered customer to allow dues.');
+      if(due !== '0.00' && (!payload.payment.due_date || payload.payment.due_date < payload.date)) throw new Error('Choose a due date on or after the invoice date.');
+      const changed=quote.totals.grand_total !== totals.grand_total || quote.items.some((item,index)=>item.base_qty !== items[index].base_qty || item.gst_pct !== items[index].gst_pct);
+      setReview({quote,payload:{...payload,quote_hash:quote.quote_hash},changed,version,snapshot:{customer:effCustomer,billType:effType,items,payment:payload.payment}});
+    } catch(error) {setErrors({submit:error.response?.data?.code ? financialError(error.response.data.code) : error.message || 'Could not check invoice totals'});}
+    finally {quoteLock.current=false;setQuoting(false);}
+    return null;
+  };
+  const confirmInvoice = async () => {
+    if(!review || review.version !== revision.current) {setReview(null);return null;}
+    const result=await mutation.run(review.payload,review.snapshot);
+    setReview(null);return result;
+  };
+  const editRejected = async () => {if(await mutation.clear()) {setReview(null);setErrors({submit:'The previous request was not recorded. Review the corrected draft before confirming again.'});}};
+  const resetBilling = useCallback(async () => {
+    if(!await mutation.clear()) return false;
+    revision.current++;setReview(null);setCustomerState(null);setBillTypeState(initialBillType);setItems([]);setPayment(emptyPayment());setErrors({});return true;
+  },[mutation,initialBillType]);
+  return {customer,setCustomer,billType,setBillType,items,addItem,updateItem,updateItemFields,removeItem,payment,setPaymentAmount,addPaymentMode,removePaymentMode,setDueDate,setFullPayment,
+    isSubmitting:quoting || mutation.busy,errors,setErrors,totals,balanceDue,paymentStatus,submitInvoice,resetBilling,review,cancelReview:()=>setReview(null),confirmInvoice,
+    draftChanged:()=>change(()=>{}),intent:mutation.intent,locked:mutation.locked,retryInvoice:()=>mutation.run(),editRejected,invoiceResult:mutation.intent?.status==='completed' ? mutation.intent.result : null};
 }

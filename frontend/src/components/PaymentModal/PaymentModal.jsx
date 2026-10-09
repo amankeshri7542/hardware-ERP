@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Modal, InputNumber, Input, DatePicker, Radio, Typography,
+  Modal, InputNumber, Input, DatePicker, Radio, Typography, Button,
   Alert, message, Space, Row, Col, Select, Tag, Spin,
 } from 'antd';
 import { formatINR, formatDate } from '../../utils/formatCurrency';
 import { recordPayment } from '../../api/payments.api';
 import { listInvoices } from '../../api/invoices.api';
+import { useFinancialMutation } from '../../hooks/useFinancialMutation.js';
+import { decimal, scaled } from '../../utils/billing.calculations.js';
+import { localDate } from '../../hooks/useBilling.js';
 
 const { Text } = Typography;
 
@@ -23,6 +26,10 @@ const STATUS_COLORS = { unpaid: 'red', partial: 'orange' };
  *   onSuccess   - called after successful payment with response data
  */
 export default function PaymentModal({ customerId, invoiceId: propInvoiceId, balanceDue: propBalanceDue, open, onClose, onSuccess }) {
+  const mutation=useFinancialMutation('payment',recordPayment);
+  const [recoveryOpen,setRecoveryOpen]=useState(false);
+  const effectiveOpen=open || recoveryOpen;
+  const {intent}=mutation;
   // If invoiceId is pre-set (from Invoice Detail page), use it directly.
   // If null (from Customer Detail page), let user pick via dropdown.
   const isCustomerLevel = !propInvoiceId && !!customerId;
@@ -37,7 +44,7 @@ export default function PaymentModal({ customerId, invoiceId: propInvoiceId, bal
   const [referenceNo, setReferenceNo] = useState('');
   const [notes, setNotes] = useState('');
   const [paymentDate, setPaymentDate] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
+  const submitting=mutation.busy;
   const [error, setError] = useState(null);
 
   // The effective invoice ID and balance to use
@@ -46,7 +53,7 @@ export default function PaymentModal({ customerId, invoiceId: propInvoiceId, bal
 
   // Fetch unpaid invoices when modal opens in customer-level mode
   useEffect(() => {
-    if (open && isCustomerLevel && customerId) {
+    if (effectiveOpen && isCustomerLevel && customerId) {
       setInvoicesLoading(true);
       Promise.all([
         listInvoices({ customer_id: customerId, status: 'unpaid', limit: 50 }),
@@ -64,11 +71,11 @@ export default function PaymentModal({ customerId, invoiceId: propInvoiceId, bal
         .catch(() => setUnpaidInvoices([]))
         .finally(() => setInvoicesLoading(false));
     }
-  }, [open, isCustomerLevel, customerId]);
+  }, [effectiveOpen, isCustomerLevel, customerId]);
 
   // Reset state when modal opens
   useEffect(() => {
-    if (open) {
+    if (effectiveOpen && !mutation.locked) {
       setSelectedInvoiceId(propInvoiceId || null);
       setSelectedBalance(propBalanceDue || 0);
       setAmount(propInvoiceId ? (propBalanceDue || 0) : 0);
@@ -78,14 +85,14 @@ export default function PaymentModal({ customerId, invoiceId: propInvoiceId, bal
       setPaymentDate(null);
       setError(null);
     }
-  }, [open, propInvoiceId, propBalanceDue]);
+  }, [effectiveOpen, propInvoiceId, propBalanceDue, mutation.locked]);
 
   // When user selects an invoice from the dropdown, update balance and amount
   const handleInvoiceSelect = useCallback((invoiceId) => {
     setSelectedInvoiceId(invoiceId);
     const inv = unpaidInvoices.find((i) => i.id === invoiceId);
     if (inv) {
-      const bal = parseFloat(inv.balance_due) || 0;
+      const bal = inv.balance_due || '0.00';
       setSelectedBalance(bal);
       setAmount(bal); // pre-fill with full balance
     } else {
@@ -94,75 +101,46 @@ export default function PaymentModal({ customerId, invoiceId: propInvoiceId, bal
     }
   }, [unpaidInvoices]);
 
-  const handleSubmit = useCallback(async () => {
-    if (!amount || amount <= 0) {
-      message.warning('Enter a valid payment amount');
+  const close = () => { setRecoveryOpen(false); onClose(); };
+  const handleSubmit = async () => {
+    if(intent?.status==='completed') {
+      if(await mutation.clear()) { onSuccess?.(intent.result); close(); }
       return;
     }
-    // Must select an invoice when in customer-level mode
-    if (isCustomerLevel && !selectedInvoiceId) {
-      message.warning('Please select which invoice this payment is for');
-      return;
-    }
-    // Cap amount at balance due for invoice-linked payments
-    if (effectiveInvoiceId && amount > effectiveBalance) {
-      message.warning(`Amount cannot exceed balance due (${formatINR(effectiveBalance)})`);
-      return;
-    }
-
-    setSubmitting(true);
+    if(intent?.status==='rejected') { if(await mutation.clear()) setError(null); return; }
+    if(intent) { await mutation.run(); return; }
     setError(null);
-
     try {
-      const payload = {
-        customer_id: customerId,
-        invoice_id: effectiveInvoiceId || null,
-        amount,
-        mode,
-        payment_date: paymentDate
-          ? paymentDate.format('YYYY-MM-DD')
-          : new Date().toISOString().split('T')[0],
-      };
-      // Exclude optional fields entirely when empty — express-validator optional()
-      // only skips 'undefined', not 'null', so we must omit the key.
-      if (referenceNo) payload.reference_no = referenceNo;
-      if (notes) payload.notes = notes;
+      const exactAmount=decimal(amount);
+      if(scaled(exactAmount)<=0n) throw new Error('Enter a positive payment amount');
+      if(isCustomerLevel && !selectedInvoiceId) throw new Error('Select the invoice for this payment');
+      if(effectiveInvoiceId && scaled(exactAmount)>scaled(effectiveBalance)) throw new Error('Amount exceeds the invoice balance. Refresh and review it.');
+      const payload={customer_id:customerId,invoice_id:effectiveInvoiceId || null,amount:exactAmount,mode,payment_date:paymentDate ? paymentDate.format('YYYY-MM-DD') : localDate()};
+      if(referenceNo) payload.reference_no=referenceNo;
+      if(notes) payload.notes=notes;
+      await mutation.run(payload,{amount:exactAmount,mode,customerId,invoiceId:effectiveInvoiceId});
+    } catch(error) {setError(error.message || 'Check the payment details');}
+  };
+  const label=intent?.status==='completed' ? 'Done' : intent?.status==='rejected' ? 'Edit rejected payment' : intent ? 'Retry original payment' : 'Record Payment';
 
-      const { data } = await recordPayment(payload);
-
-      const updatedBalance = data.data.outstanding_balance != null
-        ? data.data.outstanding_balance
-        : (effectiveBalance - amount);
-
-      message.success(
-        `Payment of ${formatINR(amount)} recorded. Customer outstanding: ${formatINR(updatedBalance)}`
-      );
-      onSuccess?.(data.data);
-      onClose();
-    } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to record payment';
-      setError(msg);
-    } finally {
-      setSubmitting(false);
-    }
-  }, [
-    amount, effectiveBalance, effectiveInvoiceId, customerId,
-    isCustomerLevel, selectedInvoiceId,
-    mode, referenceNo, notes, paymentDate, onSuccess, onClose,
-  ]);
-
-  return (
+  return (<>
+    {intent && !effectiveOpen && <Alert style={{marginTop:16}} type="warning" message="A saved payment needs review" action={<Button onClick={()=>setRecoveryOpen(true)}>Recover saved payment</Button>}/>}
     <Modal
       title="Record Payment"
-      open={open}
-      onCancel={onClose}
+      open={effectiveOpen}
+      onCancel={close}
       onOk={handleSubmit}
-      okText="Record Payment"
-      okButtonProps={{ disabled: submitting || !amount, loading: submitting }}
+      okText={label}
+      okButtonProps={{ disabled: submitting || intent?.status==='storage_error' || (!intent && !amount), loading: submitting }}
       confirmLoading={submitting}
       destroyOnHidden
       width={520}
     >
+      {intent && <Alert style={{marginBottom:16}} showIcon type={intent.status==='completed' ? 'success' : intent.status==='rejected' ? 'error' : 'warning'}
+        message={intent.status==='completed' ? 'Payment recorded' : intent.status==='rejected' ? 'Payment was not recorded' : 'Payment outcome needs confirmation'}
+        description={intent.status==='completed' ? `Receipt ${intent.result.id}: ${formatINR(intent.result.amount)}. Customer outstanding at receipt: ${formatINR(intent.result.outstanding_balance)}${intent.result.invoice_balance_due != null ? `. Invoice balance at receipt: ${formatINR(intent.result.invoice_balance_due)}` : ''}`
+          : `${intent.error || 'The original request is saved.'} ${intent.status==='rejected' ? 'Edit the payment before sending a new request.' : 'Retry the unchanged saved request to confirm the outcome before recording another payment.'}`}/>}
+      {intent?.payload && <Text>Saved payment: customer {intent.payload.customer_id}, invoice {intent.payload.invoice_id || 'advance'}, {formatINR(intent.payload.amount)} via {intent.payload.mode}</Text>}
       {error && (
         <Alert
           type="error"
@@ -173,7 +151,7 @@ export default function PaymentModal({ customerId, invoiceId: propInvoiceId, bal
         />
       )}
 
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <fieldset disabled={mutation.locked} style={{border:0,padding:0,margin:0}}><Space direction="vertical" size="middle" style={{ width: '100%' }}>
 
         {/* ── Invoice Selector (only shown when opened from Customer page) ── */}
         {isCustomerLevel && (
@@ -192,6 +170,7 @@ export default function PaymentModal({ customerId, invoiceId: propInvoiceId, bal
               />
             ) : (
               <Select
+                disabled={mutation.locked}
                 style={{ width: '100%' }}
                 placeholder="Select unpaid invoice..."
                 value={selectedInvoiceId}
@@ -247,6 +226,8 @@ export default function PaymentModal({ customerId, invoiceId: propInvoiceId, bal
         <div>
           <Text strong style={{ display: 'block', marginBottom: 4 }}>Amount</Text>
           <InputNumber
+              stringMode
+              disabled={mutation.locked}
             value={amount}
             onChange={setAmount}
             min={0.01}
@@ -263,7 +244,7 @@ export default function PaymentModal({ customerId, invoiceId: propInvoiceId, bal
         {/* ── Payment mode ── */}
         <div>
           <Text strong style={{ display: 'block', marginBottom: 4 }}>Payment Mode</Text>
-          <Radio.Group value={mode} onChange={(e) => setMode(e.target.value)}>
+          <Radio.Group disabled={mutation.locked} value={mode} onChange={(e) => setMode(e.target.value)}>
             <Radio.Button value="cash">Cash</Radio.Button>
             <Radio.Button value="upi">UPI</Radio.Button>
             <Radio.Button value="bank">Bank</Radio.Button>
@@ -276,6 +257,7 @@ export default function PaymentModal({ customerId, invoiceId: propInvoiceId, bal
           <Col span={12}>
             <Text strong style={{ display: 'block', marginBottom: 4 }}>Date</Text>
             <DatePicker
+                disabled={mutation.locked}
               value={paymentDate}
               onChange={setPaymentDate}
               style={{ width: '100%' }}
@@ -305,7 +287,7 @@ export default function PaymentModal({ customerId, invoiceId: propInvoiceId, bal
             maxLength={200}
           />
         </div>
-      </Space>
-    </Modal>
+      </Space></fieldset>
+    </Modal></>
   );
 }

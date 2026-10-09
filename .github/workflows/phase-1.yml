@@ -1,0 +1,160 @@
+name: Local engineering gates
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  local-gates:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_DB: hardware_erp_test
+          POSTGRES_USER: erp_migrator
+          POSTGRES_PASSWORD: synthetic-ci-owner-only
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U erp_migrator -d hardware_erp_test"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports: [6379:6379]
+    env:
+      NODE_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_NAME: hardware_erp_test
+      DB_USER: erp_migrator
+      DB_PASSWORD: synthetic-ci-owner-only
+      TEST_APP_DB_USER: erp_app
+      TEST_APP_DB_PASSWORD: synthetic-ci-app-only
+      CORS_ORIGIN: http://localhost:5173
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      STORAGE_DRIVER: disabled
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version-file: .nvmrc, cache: npm, cache-dependency-path: "backend/package-lock.json\nfrontend/package-lock.json"}
+      - name: Pin npm
+        run: npm install --global npm@11.17.0
+      - name: Generate isolated session key
+        run: node -e "require('fs').appendFileSync(process.env.GITHUB_ENV, 'SESSION_SECRET=' + require('crypto').randomBytes(32).toString('hex') + '\\n')"
+      - name: Install locked dependencies
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix frontend
+      - name: Lint and syntax
+        run: |
+          npm run lint --prefix backend
+          npm run check:syntax --prefix backend
+          npm run lint --prefix frontend
+      - name: Fresh and repeat migrations
+        run: |
+          node scripts/run-local-tests.cjs db/migrations/index.js
+          node scripts/run-local-tests.cjs db/migrations/index.js
+      - name: Restrict application role
+        env: {PGPASSWORD: synthetic-ci-owner-only}
+        run: |
+          psql -h 127.0.0.1 -U erp_migrator -d hardware_erp_test -v ON_ERROR_STOP=1 -c "CREATE ROLE erp_app LOGIN PASSWORD 'synthetic-ci-app-only' NOSUPERUSER NOCREATEDB NOCREATEROLE"
+          psql -h 127.0.0.1 -U erp_migrator -d hardware_erp_test -v app_role=erp_app -f db/grants.sql
+      - name: Database, security, containment and Phase 2 financial regressions
+        run: npm test --prefix backend
+      - name: Frontend auth and build
+        run: |
+          npm run test:auth --prefix frontend
+          npm run test:financial --prefix frontend
+          NODE_ENV=production npm run build --prefix frontend
+      - name: Real browser auth/navigation
+        env: {TRUST_PROXY: '127.0.0.1/32,::1/128'}
+        run: |
+          cd frontend
+          npx playwright install --with-deps chromium
+          DB_USER=erp_app DB_PASSWORD=synthetic-ci-app-only FIXTURE_DB_USER=erp_migrator FIXTURE_DB_PASSWORD=synthetic-ci-owner-only npm run test:browser
+          DB_USER=erp_app DB_PASSWORD=synthetic-ci-app-only FIXTURE_DB_USER=erp_migrator FIXTURE_DB_PASSWORD=synthetic-ci-owner-only npm run test:financial-browser
+      - name: Real database TLS and nginx SPA headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16 nginx
+          export PATH="/usr/lib/postgresql/16/bin:$PATH"
+          sh scripts/test-db-tls.sh
+          node scripts/run-local-tests.cjs --test scripts/test-nginx.js
+      - name: Dependency scan (high severity gate; moderate findings remain documented)
+        run: |
+          npm audit --prefix backend --audit-level=high
+          npm audit --prefix frontend --audit-level=high
+      - name: Install pinned secret scanner
+        run: |
+          curl --fail --silent --show-error --location https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz
+          curl --fail --silent --show-error --location https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt -o /tmp/gitleaks-checksums.txt
+          cd /tmp
+          mv gitleaks.tar.gz gitleaks_8.30.1_linux_x64.tar.gz
+          sha256sum --check --ignore-missing gitleaks-checksums.txt
+          tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
+          echo /tmp >> "$GITHUB_PATH"
+      - name: Current tracked secret scan
+        run: python3 scripts/scan-secrets.py
+      - name: Build API and web images from this exact checkout
+        run: |
+          docker build --target backend -t hardware-erp-api:${{ github.sha }} .
+          docker build --target web -t hardware-erp-web:${{ github.sha }} .
+  release-blockers:
+    name: Production release remains blocked
+    needs: local-gates
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_DB: hardware_erp_test
+          POSTGRES_USER: erp_migrator
+          POSTGRES_PASSWORD: synthetic-ci-owner-only
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U erp_migrator -d hardware_erp_test"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      NODE_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_NAME: hardware_erp_test
+      DB_USER: erp_migrator
+      DB_PASSWORD: synthetic-ci-owner-only
+      TEST_APP_DB_USER: erp_app
+      TEST_APP_DB_PASSWORD: synthetic-ci-app-only
+      CORS_ORIGIN: http://localhost:5173
+      STORAGE_DRIVER: disabled
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version-file: .nvmrc}
+      - name: Generate isolated session key
+        run: node -e "require('fs').appendFileSync(process.env.GITHUB_ENV, 'SESSION_SECRET=' + require('crypto').randomBytes(32).toString('hex') + '\\n')"
+      - name: Install and migrate disposable database
+        run: |
+          npm install --global npm@11.17.0
+          npm ci --prefix backend
+          node scripts/run-local-tests.cjs db/migrations/index.js
+      - name: Restrict application role
+        env: {PGPASSWORD: synthetic-ci-owner-only}
+        run: |
+          psql -h 127.0.0.1 -U erp_migrator -d hardware_erp_test -v ON_ERROR_STOP=1 -c "CREATE ROLE erp_app LOGIN PASSWORD 'synthetic-ci-app-only' NOSUPERUSER NOCREATEDB NOCREATEROLE"
+          psql -h 127.0.0.1 -U erp_migrator -d hardware_erp_test -v ON_ERROR_STOP=1 -v app_role=erp_app -f db/grants.sql
+      - name: Original financial invariants (returns remain blocked until Phase 3)
+        run: npm run test:release-blockers --prefix backend
+      - name: Historical credential release gate
+        if: always()
+        run: |
+          curl --fail --silent --show-error --location https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz -o /tmp/gitleaks_8.30.1_linux_x64.tar.gz
+          curl --fail --silent --show-error --location https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt -o /tmp/gitleaks-checksums.txt
+          cd /tmp
+          sha256sum --check --ignore-missing gitleaks-checksums.txt
+          tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
+          cd "$GITHUB_WORKSPACE"
+          GITLEAKS_BIN=/tmp/gitleaks python3 scripts/scan-secrets.py --history
+# No deployment job. Repository protection and approval remain operator actions.

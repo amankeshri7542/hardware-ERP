@@ -1,60 +1,35 @@
-/**
- * Global error handler middleware.
- * Maps PostgreSQL error codes to HTTP status codes.
- * Returns standardized error response: { success: false, error: message, code: CODE }
- */
+const { securityLog } = require('../utils/securityLog');
 
-// PostgreSQL error code mappings
 const PG_ERROR_MAP = {
   '23505': { status: 409, code: 'DUPLICATE_ENTRY', message: 'A record with this value already exists' },
   '23514': { status: 422, code: 'CHECK_VIOLATION', message: 'Data validation failed' },
   '23503': { status: 409, code: 'FOREIGN_KEY_VIOLATION', message: 'Referenced record does not exist' },
-  '23502': { status: 422, code: 'NOT_NULL_VIOLATION', message: 'Required field is missing' },
+  '23502': { status: 422, code: 'NOT_NULL_VIOLATION', message: 'Required field missing' },
 };
 
 function errorHandler(err, req, res, _next) {
-  // Log the error for debugging
-  console.error(`[Error] ${err.message}`, {
-    path: req.path,
-    method: req.method,
-    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-  });
-
-  // Handle PostgreSQL errors
-  if (err.code && PG_ERROR_MAP[err.code]) {
-    const mapped = PG_ERROR_MAP[err.code];
-    return res.status(mapped.status).json({
-      success: false,
-      error: process.env.NODE_ENV === 'production' ? mapped.message : (err.detail || mapped.message),
-      code: mapped.code,
-    });
-  }
-
-  // Handle known application errors with statusCode
-  if (err.statusCode) {
-    return res.status(err.statusCode).json({
-      success: false,
-      error: err.message,
-      code: err.errorCode || 'APPLICATION_ERROR',
-    });
-  }
-
-  // Handle validation errors from express-validator
+  const mapped = PG_ERROR_MAP[err.code];
+  let status = mapped?.status || err.statusCode || err.status || 500;
+  if (!Number.isInteger(status) || status < 400 || status > 599) status = 500;
+  let code = mapped?.code || 'INTERNAL_ERROR';
+  let message = mapped?.message || 'Request could not be completed';
   if (err.type === 'entity.parse.failed') {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid JSON in request body',
-      code: 'INVALID_JSON',
-    });
+    status = 400;
+    code = 'INVALID_JSON';
+    message = 'Invalid JSON in request body';
+  } else if (err.type === 'entity.too.large') {
+    status = 413;
+    code = 'PAYLOAD_TOO_LARGE';
+    message = 'Request body is too large';
+  } else if (typeof err.errorCode === 'string' && /^[A-Z_]{1,64}$/.test(err.errorCode)) {
+    code = err.errorCode;
+    // Application messages may contain submitted data; return a bounded public message.
+    message = code === 'PDF_DISABLED' ? 'PDF generation and download are unavailable during security containment'
+      : code === 'ATTACHMENTS_DISABLED' ? 'Purchase attachments are unavailable during security containment'
+        : status === 404 ? 'Requested record was not found' : 'Request could not be completed';
   }
-
-  // Default: Internal server error
-  const statusCode = err.status || 500;
-  return res.status(statusCode).json({
-    success: false,
-    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
-    code: 'INTERNAL_ERROR',
-  });
+  securityLog('request.failed', { requestId: req.requestId, method: req.method, status, code });
+  return res.status(status).json({ success: false, error: message, code, requestId: req.requestId });
 }
 
 module.exports = errorHandler;

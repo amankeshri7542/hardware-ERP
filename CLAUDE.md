@@ -4,7 +4,7 @@
 
 **Project:** Hardware & Building Materials ERP for a single-location shop in Bihar, India
 **Stack:** Node.js + Express | React 18 + Ant Design 5 | PostgreSQL 15 (AWS RDS)
-**Live:** `http://13.204.240.166` — Login: `admin@store.local` / `Aman@9431`
+**Operational status:** unverified; Phase 1 is a local candidate, not production approval.
 **Scale:** ~100-150 invoices/day, 2-3 users, single admin role
 **Last updated:** 2026-04-20
 
@@ -33,7 +33,7 @@ hardware-erp/
 ├── backend/src/
 │   ├── app.js                    # Express setup (Helmet, CORS, routes)
 │   ├── config/                   # db.js, aws.js, redis.js
-│   ├── middleware/               # JWT auth, error handler, validation
+│   ├── middleware/               # Session/capability auth, errors, validation
 │   ├── modules/                  # 11 modules (see below)
 │   ├── workers/pdfWorker.js      # BullMQ PDF consumer
 │   ├── templates/                # invoice-a4.html, invoice-thermal.html
@@ -46,7 +46,7 @@ hardware-erp/
 │   ├── api/                      # One file per module (axios-based)
 │   ├── components/               # AppLayout, ProductSearch, PWAInstallButton, etc.
 │   └── utils/                    # billing.calculations.js, formatCurrency.js
-├── db/migrations/                # 001-011, run in order
+├── db/migrations/                # historical SQL + forward migrations; use tracked runner
 ├── db/seeds/                     # Admin user, test data
 ├── .context/                     # Detailed documentation (9 files)
 └── deploy/                       # deploy.sh, nginx.conf
@@ -63,7 +63,7 @@ modules/{name}/
 
 **Modules:** auth, products, customers, invoices, payments, purchases, suppliers, reports, dashboard, settings
 
-## Local Development
+## Historical local-development notes (superseded by docs/LOCAL-DEVELOPMENT.md)
 
 ```bash
 # Backend (reads .env.local → local PostgreSQL)
@@ -79,20 +79,22 @@ cd hardware-erp/frontend && npm run dev  # port 5173
 - `frontend/.env` — production API URL
 - `frontend/.env.local` — local dev (Vite proxy)
 
-## Production Deployment (CI/CD — Automated)
+## Phase 1 engineering baseline
 
-Push to `main` triggers GitHub Actions (`.github/workflows/deploy.yml`):
-1. Builds frontend on GitHub runner (EC2 can't handle Vite builds)
-2. SCPs dist to EC2
-3. `git pull` + `npm install` on EC2
-4. Runs DB migrations (empty string cleanup, etc.)
-5. Sets up PM2 log rotation
-6. `pm2 restart all`
+Use `docs/LOCAL-DEVELOPMENT.md`, `docs/PHASE-1-REPORT.md` and
+`docs/SECURITY-RUNBOOK.md` for current setup and measured evidence. The earlier
+`.context` module descriptions are historical reference where marked.
 
-Manual deploy is only needed if CI/CD fails — see `deploy/deploy.sh`.
-
-**Infra:** EC2 t3.micro (ap-south-1) | RDS PostgreSQL 15 | S3 `uma-erp-storage` | nginx | PM2
-**CI/CD:** GitHub Actions — push to main auto-builds frontend + deploys to EC2
+- Installs use tracked locks and `npm ci` with the pinned Node LTS.
+- Apply migrations only with the checksum/advisory-lock runner. Never reset an
+  existing database or automatically mark its schema as applied.
+- Browser authentication uses a revocable HttpOnly opaque session; no bearer
+  persistence or financial-request retries.
+- PDFs and supplier attachments are disabled server-side pending containment
+  verification. Do not add a runtime bypass.
+- Production deployment from ordinary pushes is removed. Financial desired-
+  behavior regressions and operator actions block release. No Phase 2 repair is
+  included in this candidate.
 
 ## 5 Absolute Rules — Never Break These
 

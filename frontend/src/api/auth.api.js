@@ -1,5 +1,5 @@
-import api from './axios';
+import api from './axios.js';
 
 export const loginApi = (data) => api.post('/auth/login', data);
 export const logoutApi = () => api.post('/auth/logout');
-export const refreshTokenApi = () => api.post('/auth/refresh');
+export const getSessionApi = () => api.get('/auth/session');

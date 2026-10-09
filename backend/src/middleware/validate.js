@@ -9,7 +9,9 @@ function validate(req, res, next) {
   const errors = validationResult(req);
 
   if (!errors.isEmpty()) {
-    console.error('Validation errors:', errors.array());
+    require('../utils/securityLog').securityLog('validation.failed', {
+      requestId: req.requestId, method: req.method, status: 422,
+    });
     return res.status(422).json({
       success: false,
       errors: errors.array().map((err) => ({

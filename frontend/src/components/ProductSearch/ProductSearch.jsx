@@ -87,7 +87,10 @@ export default function ProductSearch({
           if (!isOpen) setIsOpen(true);
         }}
         onFocus={() => setIsOpen(true)}
-        onBlur={() => setTimeout(() => setIsOpen(false), 200)}
+        onBlur={(event) => {
+          const input = event.target;
+          setTimeout(() => { if (document.activeElement !== input) setIsOpen(false); }, 200);
+        }}
         onKeyDown={handleKeyDown}
         autoComplete="off"
         size="large"

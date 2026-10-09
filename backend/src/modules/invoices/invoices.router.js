@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const authenticateJWT = require('../../middleware/authenticateJWT');
 const validate = require('../../middleware/validate');
+const requireFinancialActor = require('../../middleware/requireFinancialActor');
 const { createInvoiceSchema, returnInvoiceSchema } = require('./invoices.validation');
 const ctrl = require('./invoices.controller');
 
@@ -8,7 +9,8 @@ const ctrl = require('./invoices.controller');
 router.use(authenticateJWT);
 
 // Create invoice
-router.post('/', createInvoiceSchema, validate, ctrl.createInvoice);
+router.post('/', requireFinancialActor, createInvoiceSchema, validate, ctrl.createInvoice);
+router.post('/quote', ctrl.quoteInvoice);
 
 // List invoices with filters
 router.get('/', ctrl.listInvoices);

@@ -1,6 +1,5 @@
 # ─── Dependencies ────────────────────────────────────
 node_modules/
-package-lock.json
 
 # ─── Environment / Secrets ───────────────────────────
 .env
@@ -43,3 +42,11 @@ pdf-output/
 .elasticbeanstalk/
 *.pid
 hardware-erp-key-ec2.pem
+.env.*
+!.env.example
+!**/.env.example
+**/dist/
+**/coverage/
+**/playwright-report/
+**/test-results/
+purchase-invoices/

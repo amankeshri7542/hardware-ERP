@@ -1,8 +1,19 @@
+> Phase 2 billing/payment behavior is defined in ../docs/BILLING-PAYMENT-CONTRACT.md
+> and verified in ../docs/PHASE-2-REPORT.md. Billing/payment descriptions below are
+> historical: client cost/base quantity is not authoritative, sales do not change
+> catalog prices, and invoice/payment mutations require Idempotency-Key plus
+> Idempotency-Actor headers bound to the original authenticated user.
+> Cashier billing, PDFs and attachments remain disabled.
+
+> Historical reference. Phase 1 changes and verified behavior are documented in
+> ../docs/PHASE-1-REPORT.md and ../docs/SECURITY-RUNBOOK.md. Old auth, PDF, upload,
+> deployment and setup descriptions below are superseded. Do not use historical credentials.
+
 # API Reference
 
 > Last updated: 2026-04-17
 
-Base URL: `/api`. All endpoints require JWT (`Authorization: Bearer <token>`) except auth and health.
+Base URL: `/api`. Private endpoints require the revocable HttpOnly session cookie.
 
 ## Response Format
 
@@ -16,17 +27,15 @@ Base URL: `/api`. All endpoints require JWT (`Authorization: Bearer <token>`) ex
 
 **Status codes:** 200 OK, 201 Created, 400 Bad Request, 401 Unauthorized, 404 Not Found, 409 Conflict, 422 Unprocessable Entity, 429 Too Many Requests, 500 Internal Server Error.
 
-## Auth
+## Auth (Phase 1)
 
-| Method | Path | Body/Params | Response |
-|--------|------|-------------|----------|
-| POST | `/auth/login` | `{ email, password }` | `{ accessToken, user }` + httpOnly refresh cookie |
-| POST | `/auth/logout` | — | Clears refresh cookie |
-| POST | `/auth/refresh` | (uses httpOnly cookie) | `{ accessToken, user }` |
-
-**Rate limiting:** Login endpoint limited to 5 attempts per 15 minutes per IP. Returns `429` with `code: RATE_LIMIT`.
-
-**Password policy:** Min 8 chars, requires uppercase + number + special character.
+All private API routes require the HttpOnly session cookie. Login returns
+`{success:true,data:{user:{id,name,role,capabilities}}}` without a bearer token.
+`GET /auth/session` reads the current session; `POST /auth/refresh` is an idempotent
+compatibility read and does not extend or rotate it. `POST /auth/logout` revokes it.
+All unsafe API requests require an allowlisted Origin. Login is rate limited.
+Cashier catalog responses use an explicit field allowlist; other capabilities are
+unassigned. PDF and attachment routes return an explicit disabled response.
 
 ## Products
 

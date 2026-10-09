@@ -204,33 +204,7 @@ export default function InvoicesPage() {
       dataIndex: 'pdf_status',
       width: 50,
       align: 'center',
-      render: (pdfStatus, record) => {
-        if (pdfStatus === 'ready') {
-          return (
-            <Tooltip title="Download PDF">
-              <Button
-                type="text"
-                size="small"
-                icon={<DownloadOutlined style={{ color: '#1890ff' }} />}
-                onClick={(e) => { e.stopPropagation(); handleDownloadPdf(record.id); }}
-              />
-            </Tooltip>
-          );
-        }
-        if (pdfStatus === 'pending') {
-          return (
-            <Tooltip title="PDF generating...">
-              <LoadingOutlined style={{ color: '#faad14' }} />
-            </Tooltip>
-          );
-        }
-        // failed or unknown
-        return (
-          <Tooltip title="PDF generation failed">
-            <WarningOutlined style={{ color: '#ff4d4f' }} />
-          </Tooltip>
-        );
-      },
+      render: () => <Tooltip title="PDF downloads are temporarily unavailable while safety checks are completed"><Tag>Unavailable</Tag></Tooltip>,
     },
     {
       title: '',

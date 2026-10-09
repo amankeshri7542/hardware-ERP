@@ -1,84 +1,56 @@
-version: '3.9'
-
+# Explicit disposable local development/test stack. Never use this for production.
 services:
-  # ─── Backend API + Frontend (served by Express in production) ────
-  api:
-    build: .
-    container_name: erp-api
-    restart: unless-stopped
-    ports:
-      - "4000:4000"
-    env_file:
-      - ./backend/.env
+  postgres:
+    image: postgres:16.15-alpine
     environment:
-      NODE_ENV: production
-      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
-    volumes:
-      # PDF output (local fallback when S3 not configured)
-      - pdf_output:/app/backend/pdf-output
-      - purchase_invoices:/app/backend/purchase-invoices
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - erp-net
-
-  # ─── Redis for BullMQ PDF queue ───────────────────────────────────
+      POSTGRES_DB: hardware_erp_test
+      POSTGRES_USER: erp_migrator
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD:?Set a local-only password}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["postgres_test_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp_migrator -d hardware_erp_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
   redis:
-    image: redis:7-alpine
-    container_name: erp-redis
-    restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning
-    volumes:
-      - redis_data:/data
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports: ["127.0.0.1:6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 3s
       timeout: 3s
-      retries: 5
-    networks:
-      - erp-net
-
-  # ─── PDF Worker (BullMQ consumer) ─────────────────────────────────
-  pdf-worker:
-    build: .
-    container_name: erp-pdf-worker
-    restart: unless-stopped
-    command: node worker.js
-    env_file:
-      - ./backend/.env
-    environment:
-      NODE_ENV: production
-      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
+      retries: 20
+  api:
+    build: {context: ., target: backend}
+    environment: &local-environment
+      NODE_ENV: test
+      PORT: 4000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: hardware_erp_test
+      DB_USER: erp_app
+      DB_PASSWORD: ${LOCAL_APP_DB_PASSWORD:?Set a separate local application password}
+      DB_SSL: "false"
       REDIS_HOST: redis
       REDIS_PORT: 6379
-    volumes:
-      - pdf_output:/app/backend/pdf-output
+      SESSION_SECRET: ${LOCAL_SESSION_SECRET:?Generate a local session secret}
+      CORS_ORIGIN: http://localhost:5173
+      STORAGE_DRIVER: disabled
+    ports: ["127.0.0.1:4000:4000"]
     depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - erp-net
-
-  # ─── Nginx reverse proxy ──────────────────────────────────────────
-  nginx:
-    image: nginx:alpine
-    container_name: erp-nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    volumes:
-      - ./deploy/nginx-docker.conf:/etc/nginx/conf.d/default.conf:ro
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  migrate:
+    build: {context: ., target: backend}
+    profiles: [tools]
+    command: ["node", "../db/migrations/index.js"]
+    environment:
+      <<: *local-environment
+      MIGRATION_DB_USER: erp_migrator
+      MIGRATION_DB_PASSWORD: ${LOCAL_DB_PASSWORD:?Set a local-only password}
     depends_on:
-      - api
-    networks:
-      - erp-net
-
+      postgres: {condition: service_healthy}
 volumes:
-  redis_data:
-  pdf_output:
-  purchase_invoices:
-
-networks:
-  erp-net:
-    driver: bridge
+  postgres_test_data:

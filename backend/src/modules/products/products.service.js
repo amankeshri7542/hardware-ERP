@@ -161,6 +161,12 @@ async function updateProduct(id, data, userId) {
   }
 
   const hasStockChange = data.current_stock !== undefined;
+  const priceFields = ['mrp', 'wholesale_price', 'purchase_price'];
+  const hasPriceChange = priceFields.some(field => data[field] !== undefined);
+  const { decimal, format } = require('../../utils/financial');
+  for (const field of priceFields) {
+    if (data[field] !== undefined) data[field] = format(decimal(data[field], 2));
+  }
 
   const fields = [];
   const values = [];
@@ -183,8 +189,8 @@ async function updateProduct(id, data, userId) {
   fields.push(`updated_at = NOW()`);
   values.push(id);
 
-  // Use transaction when stock changes to keep product + ledger in sync
-  const client = hasStockChange ? await pool.connect() : null;
+  // Price history and stock movements commit with their product update.
+  const client = hasStockChange || hasPriceChange ? await pool.connect() : null;
   const query = client ? client.query.bind(client) : pool.query.bind(pool);
 
   try {
@@ -192,12 +198,14 @@ async function updateProduct(id, data, userId) {
 
     // Get old stock before update (inside transaction for consistency)
     let oldStock = null;
-    if (hasStockChange) {
+    let oldProduct = null;
+    if (client) {
       const existing = await query(
-        'SELECT current_stock FROM products WHERE id = $1 FOR UPDATE', [id]
+        'SELECT current_stock,mrp,wholesale_price,purchase_price FROM products WHERE id = $1 FOR UPDATE', [id]
       );
       if (existing.rows.length > 0) {
-        oldStock = parseFloat(existing.rows[0].current_stock);
+        oldProduct = existing.rows[0];
+        oldStock = parseFloat(oldProduct.current_stock);
       }
     }
 
@@ -236,6 +244,15 @@ async function updateProduct(id, data, userId) {
           ]
         );
       }
+    }
+
+    if (hasPriceChange && priceFields.some(field => rows[0][field] !== oldProduct[field])) {
+      const { rows: [clock] } = await query('SELECT clock_timestamp()::text AS changed_at');
+      await query('UPDATE product_price_history SET effective_to=$2 WHERE product_id=$1 AND effective_to IS NULL', [id,clock.changed_at]);
+      await query(
+        `INSERT INTO product_price_history(product_id,purchase_price,wholesale_price,mrp,source,changed_by,effective_from)
+         VALUES($1,$2,$3,$4,'manual',$5,$6)`,
+        [id,rows[0].purchase_price,rows[0].wholesale_price,rows[0].mrp,userId,clock.changed_at]);
     }
 
     if (client) await client.query('COMMIT');

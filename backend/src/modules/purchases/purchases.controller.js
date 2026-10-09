@@ -163,78 +163,18 @@ async function getPurchaseReturns(req, res, next) {
 // ─── PURCHASE INVOICE UPLOAD ─────────────────────────────────────
 async function uploadInvoiceFile(req, res, next) {
   try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, error: 'No file uploaded' });
+    if (!/^[1-9]\d*$/.test(req.params.id) || Number(req.params.id) > 2147483647) {
+      return res.status(400).json({ success: false, code: 'INVALID_PURCHASE_ID', error: 'Invalid purchase ID' });
     }
-
-    const purchaseId = req.params.id;
-    const { originalname, buffer, mimetype } = req.file;
-    const ext = originalname.split('.').pop().toLowerCase();
-    const key = `purchase-invoices/${purchaseId}/${Date.now()}.${ext}`;
-
-    let fileUrl;
-
-    if (process.env.AWS_ACCESS_KEY_ID) {
-      const { PutObjectCommand } = require('@aws-sdk/client-s3');
-      const { s3Client } = require('../../config/aws');
-      await s3Client.send(new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: key,
-        Body: buffer,
-        ContentType: mimetype,
-      }));
-      fileUrl = key;
-    } else {
-      // Local fallback — save to disk
-      const fs = require('fs');
-      const path = require('path');
-      const dir = path.join(__dirname, '..', '..', '..', 'purchase-invoices', String(purchaseId));
-      fs.mkdirSync(dir, { recursive: true });
-      const filePath = path.join(dir, `${Date.now()}.${ext}`);
-      fs.writeFileSync(filePath, buffer);
-      fileUrl = `local://${filePath}`;
-    }
-
-    await purchasesService.updatePurchaseInvoiceUrl(purchaseId, fileUrl);
-    return res.json({ success: true, data: { invoice_file_url: fileUrl } });
-  } catch (err) {
-    next(err);
-  }
-}
-
-// ─── GET PURCHASE INVOICE URL (returns JSON with a viewable URL) ─
-async function getInvoiceFileUrl(req, res, next) {
-  try {
     const purchase = await purchasesService.getPurchaseById(req.params.id);
-    if (!purchase || !purchase.invoice_file_url) {
-      return res.status(404).json({ success: false, error: 'No invoice file found' });
+    if (!purchase) {
+      return res.status(404).json({ success: false, code: 'PURCHASE_NOT_FOUND', error: 'Purchase not found' });
     }
-
-    const { invoice_file_url } = purchase;
-
-    if (invoice_file_url.startsWith('local://')) {
-      const filePath = invoice_file_url.replace('local://', '');
-      const fs = require('fs');
-      const path = require('path');
-      if (!fs.existsSync(filePath)) {
-        return res.status(404).json({ success: false, error: 'File not found on disk' });
-      }
-      const fileBuffer = fs.readFileSync(filePath);
-      const ext = path.extname(filePath).toLowerCase();
-      const mimeMap = { '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
-      const mime = mimeMap[ext] || 'application/octet-stream';
-      const dataUrl = `data:${mime};base64,${fileBuffer.toString('base64')}`;
-      return res.json({ success: true, data: { url: dataUrl } });
-    }
-
-    // S3: return pre-signed URL in JSON so frontend can open it
-    const { getPresignedUrl } = require('../../utils/s3');
-    const url = await getPresignedUrl(invoice_file_url, 3600);
-    return res.json({ success: true, data: { url } });
-  } catch (err) {
-    next(err);
-  }
+    throw require('../../utils/documentContainment').disabledDocumentError('ATTACHMENT');
+  } catch (err) { next(err); }
 }
+
+const getInvoiceFileUrl = uploadInvoiceFile;
 
 module.exports = {
   createSupplier,

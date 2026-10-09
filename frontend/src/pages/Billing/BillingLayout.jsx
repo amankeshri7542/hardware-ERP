@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layout, Menu, Typography, Button, Space } from 'antd';
+import { Layout, Menu, Typography, Button, Space, message } from 'antd';
 import { ShoppingCartOutlined, ThunderboltOutlined, LogoutOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import useAuthStore from '../../store/authStore';
@@ -27,7 +27,7 @@ export default function BillingLayout() {
         </Space>
         <Space>
           <Text type="secondary">{user?.name || 'Admin'}</Text>
-          <Button type="text" icon={<LogoutOutlined />} onClick={logout} />
+          <Button type="text" icon={<LogoutOutlined />} aria-label="Sign out" onClick={() => logout().catch(() => message.error('Sign out could not be confirmed. Check your connection and try again.'))} />
         </Space>
       </Header>
       <div style={{ background: '#f5f5f5', padding: '4px 24px', fontSize: 12, color: '#8c8c8c' }}>

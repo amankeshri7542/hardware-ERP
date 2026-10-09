@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   Card, Descriptions, Table, Spin, Typography, Tag, message, Button,
-  Upload, Input, Alert,
+  Input, Alert,
 } from 'antd';
-import { ArrowLeftOutlined, FilePdfOutlined, UploadOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
-import { getPurchase, uploadPurchaseInvoice, getPurchaseInvoiceUrl, updatePurchaseNotes } from '../../api/purchases.api';
+import { ArrowLeftOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import { getPurchase, updatePurchaseNotes } from '../../api/purchases.api';
 import { formatINR, formatDate } from '../../utils/formatCurrency';
 import PurchaseReturnModal from '../../components/PurchaseReturnModal/PurchaseReturnModal';
 
@@ -102,46 +102,7 @@ export default function PurchaseDetailPage() {
             )}
           </Descriptions.Item>
           <Descriptions.Item label="Invoice File" span={3}>
-            {purchase.invoice_file_url ? (
-              <Button
-                type="link"
-                icon={<FilePdfOutlined />}
-                onClick={async () => {
-                  try {
-                    const { data } = await getPurchaseInvoiceUrl(purchase.id);
-                    if (data.data?.url) {
-                      window.open(data.data.url, '_blank');
-                    }
-                  } catch {
-                    message.error('Could not load invoice file');
-                  }
-                }}
-                style={{ padding: 0 }}
-              >
-                View Invoice
-              </Button>
-            ) : (
-              <Upload
-                beforeUpload={(file) => {
-                  const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
-                  if (!allowed.includes(file.type)) {
-                    message.error('Only PDF and image files are allowed');
-                    return Upload.LIST_IGNORE;
-                  }
-                  if (file.size > 5 * 1024 * 1024) {
-                    message.error('File must be smaller than 5 MB');
-                    return Upload.LIST_IGNORE;
-                  }
-                  uploadPurchaseInvoice(purchase.id, file)
-                    .then(() => { message.success('Invoice uploaded'); fetchPurchase(); })
-                    .catch(() => message.error('Upload failed'));
-                  return false;
-                }}
-                showUploadList={false}
-              >
-                <Button icon={<UploadOutlined />} size="small">Attach Invoice</Button>
-              </Upload>
-            )}
+            <Alert type="warning" showIcon message="Supplier invoice attachments and downloads are temporarily unavailable while safety checks are completed." />
           </Descriptions.Item>
         </Descriptions>
       </Card>

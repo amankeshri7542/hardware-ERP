@@ -1,8 +1,3 @@
-// hardware-erp/backend/worker.js
-// Entry point for the PDF worker process.
-// This is a SEPARATE process from server.js — Puppeteer runs here, never in server.js.
-
-require('dotenv').config();
-require('./src/workers/pdfWorker');
-
-console.log('PDF Worker started, waiting for jobs...');
+const { validateEnvironment } = require('./src/config/env');
+validateEnvironment();
+console.log(JSON.stringify({ event: 'worker_disabled', code: 'PDF_DISABLED' }));

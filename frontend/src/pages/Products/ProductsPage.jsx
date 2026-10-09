@@ -11,11 +11,16 @@ import {
 import { getProducts, deleteProduct } from '../../api/products.api';
 import { formatINR } from '../../utils/formatCurrency';
 import ProductFormModal from './ProductFormModal';
+import useAuthStore from '../../store/authStore';
+import { hasCapability } from '../../utils/access';
 
 const { Title } = Typography;
 
 export default function ProductsPage() {
   const navigate = useNavigate();
+  const user = useAuthStore(state => state.user);
+  const canEdit = hasCapability(user, 'catalog.write');
+  const canReadCost = hasCapability(user, 'cost.read');
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0 });
@@ -74,12 +79,12 @@ export default function ProductsPage() {
   const columns = [
     {
       title: 'Name', dataIndex: 'name', key: 'name',
-      render: (text, record) => (
+      render: (text, record) => canReadCost ? (
         <a onClick={() => navigate(`/products/${record.id}`)}
            style={{ fontWeight: 600 }}>
           {text}
         </a>
-      ),
+      ) : text,
     },
     { title: 'SKU', dataIndex: 'sku', key: 'sku', width: 100 },
     { title: 'Category', dataIndex: 'category', key: 'category', width: 120 },
@@ -158,10 +163,10 @@ export default function ProductsPage() {
       <Row justify="space-between" align="middle" style={{ marginBottom: 20 }}>
         <Col><Title level={3} style={{ margin: 0 }}>Products</Title></Col>
         <Col>
-          <Button type="primary" icon={<PlusOutlined />}
+          {canEdit && <Button type="primary" icon={<PlusOutlined />}
             onClick={() => { setEditProductId(null); setModalOpen(true); }}>
             Add Product
-          </Button>
+          </Button>}
         </Col>
       </Row>
 
@@ -201,7 +206,7 @@ export default function ProductsPage() {
       <Spin spinning={loading}>
         <Table
           dataSource={products}
-          columns={columns}
+          columns={columns.filter(column => (column.key !== 'purchase_price' || canReadCost) && (column.key !== 'actions' || canEdit))}
           rowKey="id"
           pagination={{
             current: pagination.page,
@@ -216,12 +221,12 @@ export default function ProductsPage() {
         />
       </Spin>
 
-      <ProductFormModal
+      {canEdit && <ProductFormModal
         open={modalOpen}
         onClose={() => { setModalOpen(false); setEditProductId(null); }}
         onSuccess={fetchProducts}
         productId={editProductId}
-      />
+      />}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import PrivateRoute from './components/PrivateRoute';
 import AppLayout from './components/AppLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import useAuthStore from './store/authStore';
+import { homePath } from './utils/access';
 import { Spin } from 'antd';
 
 // Auth pages
@@ -56,6 +57,7 @@ import CollectionsReportPage from './pages/Reports/CollectionsReportPage';
 import SettingsPage from './pages/Settings/SettingsPage';
 
 export default function App() {
+  const user = useAuthStore(state => state.user);
   const isInitializing = useAuthStore(state => state.isInitializing);
   const initialize = useAuthStore(state => state.initialize);
 
@@ -81,7 +83,7 @@ export default function App() {
         {/* Protected routes — all wrapped in AppLayout (sidebar nav) */}
         <Route element={<PrivateRoute />}>
           <Route element={<AppLayout />}>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/" element={<Navigate to={homePath(user)} replace />} />
 
             {/* Dashboard */}
             <Route path="/dashboard" element={<DashboardPage />} />

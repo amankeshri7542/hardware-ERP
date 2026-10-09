@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Button, Typography, theme } from 'antd';
+import { Layout, Menu, Button, Typography, theme, message, Alert } from 'antd';
 import {
   DashboardOutlined,
   ShoppingCartOutlined,
@@ -16,7 +16,7 @@ import {
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import useAuthStore from '../store/authStore';
-import { logoutApi } from '../api/auth.api';
+import { canAccessPath, hasCapability } from '../utils/access';
 import PWAInstallButton from './PWAInstallButton';
 
 const { Header, Sider, Content, Footer } = Layout;
@@ -55,12 +55,11 @@ export default function AppLayout() {
 
   const handleLogout = async () => {
     try {
-      await logoutApi();
+      await logout();
+      navigate('/login', { replace: true });
     } catch {
-      // Logout from client even if server call fails
+      message.error('Sign out could not be confirmed. Check your connection and try again.');
     }
-    logout();
-    navigate('/login', { replace: true });
   };
 
   return (
@@ -106,7 +105,7 @@ export default function AppLayout() {
           theme="dark"
           mode="inline"
           selectedKeys={[selectedKey]}
-          items={menuItems}
+          items={menuItems.filter(item => canAccessPath(user, item.key))}
           onClick={handleMenuClick}
         />
       </Sider>
@@ -162,6 +161,10 @@ export default function AppLayout() {
             minHeight: 'calc(100vh - 64px - 70px - 32px)',
           }}
         >
+          <Alert showIcon type="warning" style={{ marginBottom: 16 }}
+            message={hasCapability(user, 'billing.create')
+              ? 'PDF downloads and supplier invoice attachments are temporarily unavailable while safety checks are completed. You can still record purchases without attachments.'
+              : 'Your account can view the product catalog. Billing is currently unavailable for this account.'} />
           <Outlet />
         </Content>
 

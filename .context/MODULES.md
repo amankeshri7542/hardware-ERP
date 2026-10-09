@@ -1,3 +1,13 @@
+> Phase 2 billing/payment behavior is defined in ../docs/BILLING-PAYMENT-CONTRACT.md
+> and verified in ../docs/PHASE-2-REPORT.md. Billing/payment descriptions below are
+> historical: client cost/base quantity is not authoritative, sales do not change
+> catalog prices, and invoice/payment mutations require durable operation keys.
+> Cashier billing, PDFs and attachments remain disabled.
+
+> Historical reference. Phase 1 changes and verified behavior are documented in
+> ../docs/PHASE-1-REPORT.md and ../docs/SECURITY-RUNBOOK.md. Old auth, PDF, upload,
+> deployment and setup descriptions below are superseded. Do not use historical credentials.
+
 # Backend Modules — Business Logic & Patterns
 
 > Last updated: 2026-04-17
@@ -16,18 +26,12 @@ Every module in `backend/src/modules/{name}/`:
 
 ---
 
-## Auth Module
+## Auth Module (Phase 1)
 
-**Files:** `auth/auth.router.js`, `auth.controller.js`, `auth.service.js`, `auth.validation.js`
-
-- **Login:** Validates email/password → bcrypt compare (cost 12) → JWT access token (8h) + httpOnly refresh cookie (30d, sameSite: lax)
-- **Refresh:** Reads httpOnly cookie → verifies refresh token → issues new access token
-- **Logout:** Clears refresh cookie
-- **Rate limiting:** 5 attempts per 15 minutes per IP (express-rate-limit on login route only)
-- **Password policy:** Min 8 chars, uppercase, number, special character
-- Single role: `admin` — all authenticated users have full access
-
----
+Opaque sessions are persisted as HMAC digests with eight-hour expiry. Logout,
+account deactivation and password changes revoke access; concurrent session reads
+do not rotate credentials. Capability checks run before all business routes and
+cashier catalog responses are redacted. See the security runbook and security tests.
 
 ## Products Module
 

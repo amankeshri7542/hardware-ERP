@@ -6,13 +6,8 @@ const paymentsService = require('./payments.service');
  * Record a new payment (optionally linked to an invoice).
  */
 const recordPayment = asyncHandler(async (req, res) => {
-  const data = { ...req.body };
-  // If customer_id from route param (for /customers/:id/payments)
-  if (req.params.id) {
-    data.customer_id = parseInt(req.params.id, 10);
-  }
-  const result = await paymentsService.recordPayment(data, req.user.id);
-  res.status(201).json({ success: true, data: result });
+  const result = await paymentsService.recordPayment(req.body, req.user.id, req.get('Idempotency-Key'));
+  res.status(result.status).json(result.body);
 });
 
 /**

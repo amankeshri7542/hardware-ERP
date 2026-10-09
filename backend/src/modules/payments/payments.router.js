@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const authenticateJWT = require('../../middleware/authenticateJWT');
-const validate = require('../../middleware/validate');
+const requireFinancialActor = require('../../middleware/requireFinancialActor');
 const { recordPaymentSchema } = require('./payments.validation');
 const ctrl = require('./payments.controller');
 
@@ -8,7 +8,7 @@ const ctrl = require('./payments.controller');
 router.use(authenticateJWT);
 
 // Record a payment
-router.post('/', recordPaymentSchema, validate, ctrl.recordPayment);
+router.post('/', requireFinancialActor, recordPaymentSchema, ctrl.recordPayment);
 
 // List all payments (with optional filters: from, to, mode, page, limit)
 router.get('/', ctrl.listPayments);

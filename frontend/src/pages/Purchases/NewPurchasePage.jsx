@@ -2,14 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Card, Select, DatePicker, Input, Button, Table, InputNumber,
-  Typography, Space, message, Upload, Modal, Form,
+  Typography, Space, message, Modal, Form,
 } from 'antd';
 import {
   PlusOutlined, DeleteOutlined, CheckCircleOutlined,
-  UploadOutlined, FilePdfOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { createPurchase, uploadPurchaseInvoice } from '../../api/purchases.api';
+import { createPurchase } from '../../api/purchases.api';
 import { getSuppliers, createSupplier } from '../../api/suppliers.api';
 import ProductSearch from '../../components/ProductSearch/ProductSearch';
 import ProductFormModal from '../Products/ProductFormModal';
@@ -36,8 +35,6 @@ export default function NewPurchasePage() {
   const [items, setItems] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // Invoice file upload
-  const [invoiceFile, setInvoiceFile] = useState(null);
 
   // Quick-add supplier modal
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
@@ -141,15 +138,6 @@ export default function NewPurchasePage() {
       const { data } = await createPurchase(payload);
       const purchaseId = data.data.purchase.id;
       const updates = data.data.stockUpdates || [];
-
-      // Upload invoice file if selected
-      if (invoiceFile) {
-        try {
-          await uploadPurchaseInvoice(purchaseId, invoiceFile);
-        } catch {
-          message.warning('Purchase saved but invoice file upload failed. You can retry from the purchase detail page.');
-        }
-      }
 
       message.success({
         content: (
@@ -256,30 +244,9 @@ export default function NewPurchasePage() {
         {/* Invoice file upload */}
         <div style={{ marginTop: 12 }}>
           <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-            Supplier Invoice (optional, max 5 MB — PDF / JPG / PNG)
+            Supplier invoice attachment
           </Text>
-          <Upload
-            beforeUpload={(file) => {
-              const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
-              if (!allowed.includes(file.type)) {
-                message.error('Only PDF and image files are allowed');
-                return Upload.LIST_IGNORE;
-              }
-              if (file.size > 5 * 1024 * 1024) {
-                message.error('File must be smaller than 5 MB');
-                return Upload.LIST_IGNORE;
-              }
-              setInvoiceFile(file);
-              return false; // prevent auto-upload
-            }}
-            onRemove={() => setInvoiceFile(null)}
-            maxCount={1}
-            fileList={invoiceFile ? [{ uid: '-1', name: invoiceFile.name, status: 'done' }] : []}
-          >
-            <Button icon={invoiceFile ? <FilePdfOutlined /> : <UploadOutlined />}>
-              {invoiceFile ? invoiceFile.name : 'Attach Invoice File'}
-            </Button>
-          </Upload>
+          <Typography.Text type="warning">Attachments are temporarily unavailable while safety checks are completed. You can save the purchase without a file.</Typography.Text>
         </div>
       </Card>
 

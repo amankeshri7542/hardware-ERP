@@ -42,8 +42,8 @@ export default function LoginPage() {
         password: values.password,
       });
 
-      const { accessToken, user } = response.data.data;
-      login(accessToken, user);
+      const { user } = response.data.data;
+      login(user);
       navigate('/', { replace: true });
     } catch (err) {
       const message =

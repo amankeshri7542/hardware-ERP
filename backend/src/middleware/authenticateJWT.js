@@ -1,26 +1,21 @@
-const jwt = require('jsonwebtoken');
+const { findSession } = require('../modules/auth/auth.service');
+const { cookieName, cookieOptions } = require('../modules/auth/sessionCookie');
 
-/**
- * Express middleware that verifies a Bearer JWT from the Authorization header.
- * On success, attaches { id, name, role } to req.user and calls next().
- * On failure, responds with 401.
- */
-function authenticateJWT(req, res, next) {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, error: 'Unauthorized' });
-  }
-
-  const token = authHeader.split(' ')[1];
-
+// The import name is retained for existing routers; bearer tokens are no longer accepted.
+async function authenticateSession(req, res, next) {
+  if (req.user) return next();
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = { id: payload.id, name: payload.name, role: payload.role };
+    const user = await findSession(req.cookies?.[cookieName]);
+    res.set('Cache-Control', 'no-store');
+    if (!user) {
+      res.clearCookie(cookieName, cookieOptions);
+      return res.status(401).json({ success: false, error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    }
+    req.user = user;
     return next();
-  } catch {
-    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  } catch (err) {
+    return next(err);
   }
 }
 
-module.exports = authenticateJWT;
+module.exports = authenticateSession;

@@ -8,8 +8,8 @@ const invoicesService = require('./invoices.service');
  */
 const createInvoice = asyncHandler(async (req, res) => {
   try {
-    const result = await invoicesService.createInvoice(req.body, req.user.id);
-    res.status(201).json({ success: true, data: result });
+    const result = await invoicesService.createInvoice(req.body, req.user.id, req.get('Idempotency-Key'));
+    res.status(result.status).json(result.body);
   } catch (err) {
     if (err.errorCode === 'INSUFFICIENT_STOCK') {
       return res.status(422).json({
@@ -26,6 +26,10 @@ const createInvoice = asyncHandler(async (req, res) => {
 /**
  * GET /api/invoices
  */
+const quoteInvoice = asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await invoicesService.quoteInvoice(req.body) });
+});
+
 const listInvoices = asyncHandler(async (req, res) => {
   const {
     customer_id,
@@ -126,14 +130,8 @@ const getPdf = asyncHandler(async (req, res) => {
 /**
  * POST /api/invoices/:id/regenerate-pdf
  */
-const regeneratePdf = asyncHandler(async (req, res) => {
-  const invoiceId = parseInt(req.params.id, 10);
-  try {
-    const s3Key = await invoicesService.generatePdfDirect(invoiceId);
-    res.json({ success: true, data: { pdf_status: 'ready', pdf_url: s3Key } });
-  } catch (err) {
-    res.status(500).json({ success: false, error: 'PDF generation failed: ' + err.message });
-  }
+const regeneratePdf = asyncHandler(async () => {
+  throw require('../../utils/documentContainment').disabledDocumentError('PDF');
 });
 
 /**
@@ -147,6 +145,7 @@ const processReturn = asyncHandler(async (req, res) => {
 
 module.exports = {
   createInvoice,
+  quoteInvoice,
   listInvoices,
   getInvoice,
   getPdfStatus,

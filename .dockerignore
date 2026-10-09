@@ -1,0 +1,17 @@
+**/.env
+**/.env.*
+**/node_modules
+**/dist
+**/coverage
+**/playwright-report
+**/test-results
+**/*.log
+**/*.pem
+**/*.key
+**/pdf-output
+**/purchase-invoices
+.git
+.context
+.codex
+.agents
+final-invoice-sample.jpeg

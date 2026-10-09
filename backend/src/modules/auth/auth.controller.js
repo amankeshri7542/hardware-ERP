@@ -1,94 +1,45 @@
-const jwt = require('jsonwebtoken');
 const authService = require('./auth.service');
+const { securityLog } = require('../../utils/securityLog');
+const { cookieName, cookieOptions, sessionTtlMs } = require('./sessionCookie');
 
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  sameSite: 'lax',
-  secure: process.env.NODE_ENV === 'production' && process.env.HTTPS_ENABLED === 'true',
-  path: '/',
-};
-
-/**
- * POST /auth/login
- */
 async function login(req, res, next) {
   try {
     const { email, password } = req.body;
-
     const user = await authService.findUserByEmail(email);
-    if (!user) {
-      return res.status(401).json({ success: false, error: 'Invalid email or password' });
+    const valid = await authService.verifyPassword(password, user?.password_hash);
+    if (!user || !valid) {
+      securityLog('auth.login_denied', { requestId: req.requestId, status: 401 });
+      return res.status(401).json({ success: false, error: 'Invalid email or password', code: 'INVALID_CREDENTIALS' });
     }
-
-    const valid = await authService.verifyPassword(password, user.password_hash);
-    if (!valid) {
-      return res.status(401).json({ success: false, error: 'Invalid email or password' });
-    }
-
-    const { accessToken, refreshToken } = authService.generateTokens(user);
-
-    res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS);
-
-    return res.json({
-      success: true,
-      data: {
-        accessToken,
-        user: { id: user.id, name: user.name, role: user.role },
-      },
-    });
+    await authService.revokeSession(req.cookies?.[cookieName]);
+    const token = await authService.createSession(user);
+    if (!token) return res.status(401).json({ success: false, error: 'Invalid email or password', code: 'INVALID_CREDENTIALS' });
+    res.clearCookie('refreshToken', { path: '/', httpOnly: true, sameSite: 'lax', secure: cookieOptions.secure });
+    res.cookie(cookieName, token, { ...cookieOptions, maxAge: sessionTtlMs });
+    res.set('Cache-Control', 'no-store');
+    securityLog('auth.login', { requestId: req.requestId, userId: user.id, status: 200 });
+    return res.json({ success: true, data: { user: authService.publicUser(user) } });
   } catch (err) {
-    next(err);
+    return next(err);
   }
 }
 
-/**
- * POST /auth/logout
- */
-function logout(req, res) {
-  res.clearCookie('refreshToken', COOKIE_OPTIONS);
-  return res.json({ success: true });
-}
-
-/**
- * POST /auth/refresh
- */
-async function refreshToken(req, res, next) {
+async function logout(req, res, next) {
   try {
-    const token = req.cookies && req.cookies.refreshToken;
-    if (!token) {
-      return res.status(401).json({ success: false, error: 'Refresh token missing' });
-    }
-
-    let payload;
-    try {
-      payload = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-    } catch {
-      return res.status(401).json({ success: false, error: 'Invalid or expired refresh token' });
-    }
-
-    // Look up the user by id from the refresh token payload
-    const { pool } = require('../../config/db');
-    const { rows } = await pool.query(
-      'SELECT id, name, role FROM users WHERE id = $1 AND is_active = true',
-      [payload.id]
-    );
-
-    if (!rows[0]) {
-      return res.status(401).json({ success: false, error: 'User not found' });
-    }
-
-    const { accessToken } = authService.generateTokens(rows[0]);
-
-    return res.json({ 
-      success: true, 
-      data: { 
-        accessToken,
-        user: { id: rows[0].id, name: rows[0].name, role: rows[0].role }
-      } 
-    });
+    await authService.revokeSession(req.cookies?.[cookieName]);
+    res.clearCookie(cookieName, cookieOptions);
+    res.clearCookie('refreshToken', { path: '/', httpOnly: true, sameSite: 'lax', secure: cookieOptions.secure });
+    res.set('Cache-Control', 'no-store');
+    securityLog('auth.logout', { requestId: req.requestId, status: 200 });
+    return res.json({ success: true });
   } catch (err) {
-    next(err);
+    return next(err);
   }
 }
 
-module.exports = { login, logout, refreshToken };
+function session(req, res) {
+  res.set('Cache-Control', 'no-store');
+  return res.json({ success: true, data: { user: req.user } });
+}
+
+module.exports = { login, logout, session };

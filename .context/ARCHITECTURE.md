@@ -1,3 +1,7 @@
+> Historical reference. Phase 1 changes and verified behavior are documented in
+> ../docs/PHASE-1-REPORT.md and ../docs/SECURITY-RUNBOOK.md. Old auth, PDF, upload,
+> deployment and setup descriptions below are superseded. Do not use historical credentials.
+
 # Architecture
 
 > Last updated: 2026-04-20

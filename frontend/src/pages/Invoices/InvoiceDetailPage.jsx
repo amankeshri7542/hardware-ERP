@@ -42,7 +42,7 @@ export default function InvoiceDetailPage() {
         getInvoicePayments(id).catch(() => ({ data: { data: [] } })),
       ]);
       setInvoice(invoiceRes.data.data);
-      setPayments(paymentsRes.data.data || []);
+      setPayments(paymentsRes.data.data?.payments || []);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load invoice');
     } finally {
@@ -95,9 +95,7 @@ export default function InvoiceDetailPage() {
     ? 'Quick Bill'
     : invoice.bill_type?.charAt(0).toUpperCase() + invoice.bill_type?.slice(1);
 
-  const balanceDue = parseFloat(
-    ((invoice.grand_total || 0) - (invoice.amount_paid || 0)).toFixed(2)
-  );
+  const balanceDue = invoice.balance_due;
   const showPaymentAction = balanceDue > 0;
   const isReturnable = invoice.status !== 'returned';
 
@@ -136,11 +134,10 @@ export default function InvoiceDetailPage() {
     {
       title: 'Profit', width: 100, align: 'right',
       render: (_, record) => {
-        const cost = (record.cost_price_snapshot || 0) * (record.qty || 0);
-        const profit = (record.taxable_amount || 0) - cost;
+        const profit = record.line_profit;
         return (
           <Text style={{ color: profit >= 0 ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>
-            {profit >= 0 ? '+' : ''}{formatINR(profit)}
+            {profit == null ? 'Unavailable' : formatINR(profit)}
           </Text>
         );
       },
@@ -162,13 +159,8 @@ export default function InvoiceDetailPage() {
     { title: 'Notes', dataIndex: 'notes', ellipsis: true, render: (v) => v || '--' },
   ];
 
-  // Calculate totals for profit section
-  const totalCost = (invoice.items || []).reduce(
-    (sum, item) => sum + ((item.cost_price_snapshot || 0) * (item.qty || 0)),
-    0
-  );
-  const totalProfit = (invoice.taxable_total || 0) - totalCost;
-
+  const totalCost = invoice.total_cost;
+  const totalProfit = invoice.profit_amount;
   return (
     <div style={{ padding: 24 }}>
       {/* Header */}
@@ -187,11 +179,11 @@ export default function InvoiceDetailPage() {
         </Col>
         <Col>
           <Space>
-            <Tooltip title="Download PDF">
-              <Button icon={<DownloadOutlined />} onClick={handleDownloadPdf}>PDF</Button>
+            <Tooltip title="PDF downloads are temporarily unavailable while safety checks are completed">
+              <Button icon={<DownloadOutlined />} disabled>PDF unavailable</Button>
             </Tooltip>
             <Tooltip title="Print">
-              <Button icon={<PrinterOutlined />} onClick={handleDownloadPdf}>Print</Button>
+              <Button icon={<PrinterOutlined />} disabled>Print unavailable</Button>
             </Tooltip>
             {isReturnable && (
               <Button
@@ -335,13 +327,13 @@ export default function InvoiceDetailPage() {
             </Row>
             <Row justify="space-between" style={{ marginBottom: 4 }}>
               <Text type="secondary">Cost of Goods</Text>
-              <Text>{formatINR(totalCost)}</Text>
+              <Text>{totalCost == null ? 'Unavailable' : formatINR(totalCost)}</Text>
             </Row>
             <Divider style={{ margin: '8px 0' }} />
             <Row justify="space-between">
               <Text strong>Net Profit</Text>
               <Text strong style={{ color: totalProfit >= 0 ? '#52c41a' : '#ff4d4f', fontSize: 16 }}>
-                {totalProfit >= 0 ? '+' : ''}{formatINR(totalProfit)}
+                {totalProfit == null ? 'Unavailable' : formatINR(totalProfit)}
               </Text>
             </Row>
           </Card>

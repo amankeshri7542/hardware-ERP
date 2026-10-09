@@ -7,9 +7,8 @@ import { DeleteOutlined, PrinterOutlined, DownloadOutlined } from '@ant-design/i
 import { useBilling } from '../../hooks/useBilling';
 import ProductSearch from '../../components/ProductSearch/ProductSearch';
 import { formatINR } from '../../utils/formatCurrency';
-import { pollPdfStatus } from '../../utils/pdfPoller';
-import { openInvoicePdf } from '../../api/invoices.api';
 import './BillingPage.css';
+import InvoiceReview from '../../components/InvoiceReview/InvoiceReview';
 
 const { Title, Text } = Typography;
 
@@ -17,50 +16,16 @@ export default function QuickBillPage() {
   const billing = useBilling('quickbill');
   const [walkinName, setWalkinName] = useState('');
   const [successData, setSuccessData] = useState(null);
-  const [pdfReady, setPdfReady] = useState(false);
-  const [pdfError, setPdfError] = useState(false);
   const productSearchRef = useRef(null);
   const qtyRefs = useRef({});
-  const cleanupRef = useRef(null);
-
-  // Ensure billType is always quickbill
-  useEffect(() => {
-    billing.setBillType('quickbill');
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // F9 shortcut to submit
   const handleSubmit = useCallback(async () => {
-    if (billing.totals.grand_total <= 0) {
-      message.error('Add at least one item');
-      return;
-    }
-
-    // Build payment and customer overrides to avoid React state batching issues
-    const currentMode = billing.payment.modes[0]?.mode || 'cash';
-    const paymentOverride = {
-      amount_paid: billing.totals.grand_total,
-      modes: [{ mode: currentMode, amount: billing.totals.grand_total, reference_no: '' }],
-      due_date: null,
-    };
-    const customerOverride = walkinName.trim()
-      ? { name: walkinName.trim() }
-      : null;
-
-    const result = await billing.submitInvoice({
-      payment: paymentOverride,
-      customer: customerOverride,
-      billType: 'quickbill',
-    });
-    if (result) {
-      setSuccessData(result);
-      cleanupRef.current = pollPdfStatus(result.invoice_id, {
-        onReady: () => setPdfReady(true),
-        onFailed: () => setPdfError(true),
-        onTimeout: () => setPdfError(true),
-      });
-    }
+    await billing.submitInvoice({billType:'quickbill',customer:walkinName.trim() ? {name:walkinName.trim()} : null,
+      payment:{amount_paid:'0.00',modes:[],due_date:null},payFullMode:billing.payment.modes[0]?.mode || 'cash'});
   }, [billing, walkinName]);
 
+  useEffect(()=>{if(billing.invoiceResult) setSuccessData(billing.invoiceResult);},[billing.invoiceResult]);
   useEffect(() => {
     const handler = (e) => {
       if (e.key === 'F9') {
@@ -71,13 +36,6 @@ export default function QuickBillPage() {
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [handleSubmit]);
-
-  // Cleanup PDF poller on unmount
-  useEffect(() => {
-    return () => {
-      if (cleanupRef.current) cleanupRef.current();
-    };
-  }, []);
 
   const handleProductSelect = useCallback((product) => {
     if (!product || !product.id) return;
@@ -102,27 +60,11 @@ export default function QuickBillPage() {
     billing.addPaymentMode(mode, amount, '');
   }, [billing]);
 
-  const handleNewBill = useCallback(() => {
-    if (cleanupRef.current) {
-      cleanupRef.current();
-      cleanupRef.current = null;
-    }
+  const handleNewBill = useCallback(async () => {
+    if(!await billing.resetBilling()) return;
     setSuccessData(null);
-    setPdfReady(false);
-    setPdfError(false);
     setWalkinName('');
-    billing.resetBilling();
-    billing.setBillType('quickbill');
   }, [billing]);
-
-  const handlePrint = useCallback(async () => {
-    if (!successData) return;
-    try {
-      await openInvoicePdf(successData.invoice_id);
-    } catch {
-      message.error('Failed to get PDF');
-    }
-  }, [successData]);
 
   const columns = [
     {
@@ -145,6 +87,8 @@ export default function QuickBillPage() {
       width: 90,
       render: (val, _, i) => (
         <InputNumber
+          stringMode
+          disabled={billing.locked}
           ref={(el) => { qtyRefs.current[i] = el; }}
           className="billing-qty-input"
           min={0.001}
@@ -159,40 +103,27 @@ export default function QuickBillPage() {
       ),
     },
     {
-      title: 'Rate',
+      title: 'Rate / unit',
       dataIndex: 'rate',
       width: 100,
       render: (val, _, i) => (
         <InputNumber
+          stringMode
+          disabled={billing.locked}
           className="billing-rate-input"
+          precision={2}
           min={0}
           step={0.5}
           value={val}
           size="small"
           style={{ width: '100%' }}
-          onChange={(v) => billing.updateItem(i, 'rate', v || 0)}
+          onChange={(v) => billing.updateItem(i, 'rate', v ?? '')}
           onFocus={(e) => e.target.select()}
         />
       ),
     },
     {
-      title: 'GST%',
-      dataIndex: 'gst_pct',
-      width: 80,
-      align: 'center',
-      render: (val, _, i) => (
-        <InputNumber
-          className="billing-gst-input"
-          min={0}
-          max={100}
-          step={1}
-          value={val}
-          size="small"
-          style={{ width: '100%' }}
-          onChange={(v) => billing.updateItem(i, 'gst_pct', v ?? 0)}
-          onFocus={(e) => e.target.select()}
-        />
-      ),
+      title:'GST (catalog)',dataIndex:'gst_pct',width:90,render:value=>`${value}%`,
     },
     {
       title: 'Total',
@@ -220,11 +151,12 @@ export default function QuickBillPage() {
 
   return (
     <div style={{ padding: 24 }}>
+      <InvoiceReview billing={billing}/>
       <Card>
         <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
           <Col>
             <Title level={4} style={{ margin: 0 }}>
-              Quick Bill <Tag color="orange">Walk-In</Tag>
+              Quick Bill <Tag color="orange">Walk-In · paid in full</Tag>
             </Title>
           </Col>
         </Row>
@@ -269,9 +201,10 @@ export default function QuickBillPage() {
           {/* Left: Product entry + items */}
           <Col xs={24} lg={16}>
             <Input
+              disabled={billing.locked}
               placeholder="Walk-in customer name (optional)"
               value={walkinName}
-              onChange={(e) => setWalkinName(e.target.value)}
+              onChange={(e) => {billing.draftChanged();setWalkinName(e.target.value);}}
               maxLength={100}
               style={{ marginBottom: 16 }}
               allowClear
@@ -317,7 +250,7 @@ export default function QuickBillPage() {
           <Col xs={24} lg={8}>
             <Card size="small" title="Payment">
               <div style={{ marginBottom: 16 }}>
-                <Radio.Group value={currentMode} onChange={handlePaymentModeChange}>
+                <Radio.Group disabled={billing.locked} value={currentMode} onChange={handlePaymentModeChange}>
                   <Radio.Button value="cash">Cash</Radio.Button>
                   <Radio.Button value="upi">UPI</Radio.Button>
                 </Radio.Group>
@@ -370,7 +303,7 @@ export default function QuickBillPage() {
         {successData && (
           <div style={{ textAlign: 'center', padding: 16 }}>
             <Title level={3} style={{ marginBottom: 8 }}>{successData.invoice_no}</Title>
-            <Tag color="green" style={{ fontSize: 14, padding: '2px 12px' }}>PAID</Tag>
+            <Tag color="green" style={{ fontSize: 14, padding: '2px 12px' }}>{successData.status?.toUpperCase()}</Tag>
 
             <Divider />
 
@@ -380,25 +313,7 @@ export default function QuickBillPage() {
 
             <Divider />
 
-            {!pdfReady && !pdfError && (
-              <Space direction="vertical" align="center">
-                <Spin />
-                <Text type="secondary">Generating PDF...</Text>
-              </Space>
-            )}
-            {pdfReady && (
-              <Space>
-                <Button icon={<PrinterOutlined />} onClick={handlePrint}>
-                  Print
-                </Button>
-                <Button icon={<DownloadOutlined />} onClick={handlePrint}>
-                  Download
-                </Button>
-              </Space>
-            )}
-            {pdfError && (
-              <Text type="danger">PDF generation failed. You can download it later from invoice details.</Text>
-            )}
+            <Alert type="warning" showIcon message="PDF printing and downloads are temporarily unavailable while safety checks are completed." />
 
             <Divider />
 

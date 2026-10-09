@@ -1,0 +1,39 @@
+# Configuration template only. Release remains blocked; requires validated external DB TLS and operator certificates.
+services:
+  api:
+    image: ${ERP_API_IMAGE:?Use an approved immutable image digest}
+    env_file: ./backend/.env.production
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      HTTPS_ENABLED: "true"
+      DB_SSL: "true"
+      DB_SSL_CA_PATH: /run/certs/db-ca.pem
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      STORAGE_DRIVER: disabled
+      TRUST_PROXY: 172.30.10.10
+    read_only: true
+    tmpfs: [/tmp]
+    volumes: ["${DB_CA_FILE:?Provide verified DB CA}:/run/certs/db-ca.pem:ro"]
+    networks:
+      private: {ipv4_address: 172.30.10.20}
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks: [private]
+  nginx:
+    image: ${ERP_WEB_IMAGE:?Use the same approved revision as API, with immutable image digest}
+    ports: ["80:8080", "443:8443"]
+    volumes:
+      - ${TLS_CERT_FILE:?Provide TLS certificate}:/run/certs/tls.crt:ro
+      - ${TLS_KEY_FILE:?Provide TLS key readable by uid101}:/run/certs/tls.key:ro
+    read_only: true
+    tmpfs: [/tmp]
+    depends_on: [api]
+    networks:
+      private: {ipv4_address: 172.30.10.10}
+networks:
+  private:
+    ipam:
+      config: [{subnet: 172.30.10.0/24}]

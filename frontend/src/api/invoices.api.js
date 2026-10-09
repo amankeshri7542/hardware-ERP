@@ -1,6 +1,7 @@
 import api from './axios';
 
-export const createInvoice = (data) => api.post('/invoices', data);
+export const createInvoice = (data, key, actorId) => api.post('/invoices', data, { timeout: 15000, headers: { 'Idempotency-Key': key, 'Idempotency-Actor': String(actorId) } });
+export const quoteInvoice = (data) => api.post('/invoices/quote', data);
 export const getInvoice = (id) => api.get(`/invoices/${id}`);
 export const listInvoices = (params) => api.get('/invoices', { params });
 export const getPdfStatus = (id) => api.get(`/invoices/${id}/pdf-status`);
