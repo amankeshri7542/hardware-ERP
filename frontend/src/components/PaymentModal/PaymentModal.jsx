@@ -131,7 +131,7 @@ export default function PaymentModal({ customerId, invoiceId: propInvoiceId, bal
       onCancel={close}
       onOk={handleSubmit}
       okText={label}
-      okButtonProps={{ disabled: submitting || intent?.status==='storage_error' || (!intent && !amount), loading: submitting }}
+      okButtonProps={{ 'aria-label': label, 'aria-busy': submitting, disabled: submitting || intent?.status==='storage_error' || (!intent && !amount), loading: submitting }}
       confirmLoading={submitting}
       destroyOnHidden
       width={520}

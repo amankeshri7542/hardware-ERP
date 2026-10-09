@@ -45,7 +45,7 @@ async function loginPage(page,identity=email){
 }
 async function session(t){
  const context=await browser.newContext({serviceWorkers:'block',extraHTTPHeaders:{'X-Forwarded-For':`127.0.0.${++sessionNumber}`}});const attempted=new Set();
- const control={drop:null,requests:[],quoteGate:null,quoteReached:null};
+ const control={drop:null,requests:[],quoteGate:null,quoteReached:null,paymentGate:null,paymentReached:null};
  await context.routeWebSocket('**/*',socket=>{attempted.add('websocket');socket.close();});
  await context.route('**/*',async route=>{
   const request=route.request();const url=new URL(request.url());
@@ -57,6 +57,7 @@ async function session(t){
   const location=response.headers().location;
   if(location && new URL(location,url).origin!==origin){attempted.add(new URL(location,url).origin);return route.abort('blockedbyclient');}
   if(url.pathname==='/api/invoices/quote' && control.quoteGate){control.quoteReached?.();await control.quoteGate;}
+  if(request.method()==='POST' && url.pathname==='/api/payments' && control.paymentGate){control.paymentReached?.();await control.paymentGate;}
   if(request.method()==='POST' && url.pathname===control.drop){control.drop=null;assert.equal(response.status(),201,'Drop only a real successful committed response');return route.abort('failed');}
   return route.fulfill({response});
  });
@@ -137,12 +138,24 @@ test('registered Quick Bill debt and lost payment response use authoritative bal
  assert.equal((await fixtures.query('SELECT outstanding_balance FROM customers WHERE id=$1',[fixture.customer])).rows[0].outstanding_balance,'10.00');
  await page.goto(`${origin}/invoices/${invoice.invoice_id}`);await page.getByRole('button',{name:/Record Payment$/}).click();
  const dialog=page.getByRole('dialog',{name:'Record Payment'});await dialog.getByRole('spinbutton').fill('0.30');control.drop='/api/payments';await dialog.getByRole('button',{name:'Record Payment',exact:true}).click();
- await expect(page.getByText('Payment outcome needs confirmation')).toBeVisible();await page.reload();await page.getByRole('button',{name:'Recover saved payment'}).click();await page.getByRole('button',{name:'Retry original payment'}).click();
+ await expect(page.getByText('Payment outcome needs confirmation')).toBeVisible();await page.reload();await page.getByRole('button',{name:'Recover saved payment'}).click();
+ // Keep the actual committed replay response pending to exercise the loading icon's accessible name.
+ let releasePayment;control.paymentGate=new Promise(resolve=>{releasePayment=resolve;});const paymentReached=new Promise(resolve=>{control.paymentReached=resolve;});
+ await page.getByRole('button',{name:'Retry original payment'}).click();await paymentReached;
+ const retryButton=page.getByRole('dialog').locator('button').filter({hasText:'Retry original payment'});
+ try {await expect(retryButton.getByRole('img',{name:'loading',exact:true})).toBeVisible();await expect(retryButton).toHaveAccessibleName('Retry original payment');await expect(retryButton).toBeDisabled();await expect(retryButton).toHaveAttribute('aria-busy','true');}
+ finally {releasePayment();}
+
  await expect(page.getByText('Payment recorded',{exact:true})).toBeVisible();await expect(page.getByRole('dialog')).toContainText('9.70');
  const payments=control.requests.filter(item=>item.path==='/api/payments');assert.equal(payments.length,2);assert.deepEqual(payments[0],payments[1]);
  assert.equal((await fixtures.query('SELECT COUNT(*)::int n FROM payments WHERE invoice_id=$1',[invoice.invoice_id])).rows[0].n,1);
  assert.equal((await fixtures.query('SELECT balance_due FROM invoices WHERE id=$1',[invoice.invoice_id])).rows[0].balance_due,'9.70');
- await page.getByRole('button',{name:'Done',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
+ const done=page.getByRole('button',{name:'Done',exact:true});await expect(done).toHaveAttribute('aria-busy','false');
+ await done.click();await expect(page.getByRole('dialog')).toHaveCount(0);
+ const summary=page.locator('.ant-card').filter({has:page.getByText('Payment Summary',{exact:true})});
+ await expect(summary).toContainText('₹9.70');await expect(summary).toContainText('₹0.30');
+ const history=page.locator('.ant-card').filter({has:page.getByText('Payment History',{exact:true})});
+ await expect(history.locator('tbody tr[data-row-key]')).toHaveCount(1);await expect(history).toContainText('₹0.30');
 });
 
 test('two tabs finalizing together share one persisted invoice operation',async t=>{
