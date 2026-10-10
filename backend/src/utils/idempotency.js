@@ -44,6 +44,7 @@ async function withIdempotency({ actorId, operation, key, intent }, action) {
       `UPDATE idempotency_keys SET status_code=$4,response_body=$5
        WHERE actor_id=$1 AND operation=$2 AND key=$3 RETURNING status_code,response_body`,
       [actorId, operation, key, result.status, JSON.stringify(result.body)]);
+    await require('../modules/documents/documents.service').captureFinancialResult(client, { operation, result, actorId });
     await client.query('COMMIT');
     return { status: rows[0].status_code, body: rows[0].response_body, replayed: false };
   } catch (error) {

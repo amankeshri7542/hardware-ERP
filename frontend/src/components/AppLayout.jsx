@@ -165,7 +165,7 @@ export default function AppLayout() {
         >
           <Alert showIcon type="warning" style={{ marginBottom: 16 }}
             message={hasCapability(user, 'billing.create')
-              ? 'PDF downloads and supplier invoice attachments are temporarily unavailable while safety checks are completed. You can still record purchases without attachments.'
+              ? 'Legacy PDF exports and supplier invoice attachments remain unavailable. Supported record documents appear only when enabled. You can still record purchases without attachments.'
               : 'Your account can view the product catalog. Billing is currently unavailable for this account.'} />
           <Outlet />
         </Content>

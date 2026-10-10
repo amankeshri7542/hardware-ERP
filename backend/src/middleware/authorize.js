@@ -2,12 +2,14 @@ const CAPABILITIES = Object.freeze({
   admin: Object.freeze(['catalog.read', 'catalog.write', 'stock.read', 'stock.adjust', 'cost.read',
     'billing.create', 'invoices.read', 'returns.create', 'customers.read', 'customers.write',
     'suppliers.read', 'suppliers.write', 'purchases.read', 'purchases.write', 'payments.read',
-    'payments.write', 'dashboard.read', 'reports.read', 'exports.read', 'settings.read', 'finance.read', 'finance.write']),
+    'payments.write', 'dashboard.read', 'reports.read', 'exports.read', 'settings.read', 'finance.read', 'finance.write', 'documents.read', 'documents.write']),
   cashier: Object.freeze(['catalog.read']),
 });
 
 // New endpoints have no privilege until explicitly classified here.
 const ROUTES = [
+  ['GET', /^\/documents(?:\/(?:capabilities|[a-fA-F0-9-]+(?:\/download)?))?\/?$/, 'documents.read'],
+  ['POST', /^\/documents(?:\/[a-fA-F0-9-]+\/retry)?\/?$/, 'documents.write'],
   ['GET', /^\/finance\/(?:customers|suppliers)\/\d+(?:\/statement)?\/?$/, 'finance.read'],
   ['GET', /^\/finance\/statements\/(?:customer|supplier)\/\d+\/?$/, 'finance.read'],
   ['GET', /^\/finance\/(?:anonymous|days|reports|summary|export\.csv)\/?$/, 'finance.read'],

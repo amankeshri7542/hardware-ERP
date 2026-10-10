@@ -34,12 +34,17 @@ jobs:
       CORS_ORIGIN: http://localhost:5173
       REDIS_HOST: 127.0.0.1
       REDIS_PORT: 6379
+      TEST_DOCUMENT_WORKER_USER: erp_documents
+      TEST_DOCUMENT_WORKER_PASSWORD: synthetic-ci-document-only
+      DOCUMENT_DB_USER: erp_documents
+      DOCUMENT_DB_PASSWORD: synthetic-ci-document-only
+      DOCUMENT_RENDERER_DRIVER: docker
       STORAGE_DRIVER: disabled
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
       - uses: actions/setup-node@v4
-        with: {node-version-file: .nvmrc, cache: npm, cache-dependency-path: "backend/package-lock.json\nfrontend/package-lock.json"}
+        with: {node-version-file: .nvmrc, cache: npm, cache-dependency-path: "backend/package-lock.json\nfrontend/package-lock.json\nrenderer/package-lock.json"}
       - name: Pin npm
         run: npm install --global npm@11.17.0
       - name: Generate isolated session key
@@ -48,6 +53,7 @@ jobs:
         run: |
           npm ci --prefix backend
           npm ci --prefix frontend
+          npm ci --prefix renderer
       - name: Lint and syntax
         env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
         run: |
@@ -64,6 +70,13 @@ jobs:
         run: |
           psql -h 127.0.0.1 -U erp_migrator -d hardware_erp_test -v ON_ERROR_STOP=1 -c "CREATE ROLE erp_app LOGIN PASSWORD 'synthetic-ci-app-only' NOSUPERUSER NOCREATEDB NOCREATEROLE"
           psql -h 127.0.0.1 -U erp_migrator -d hardware_erp_test -v app_role=erp_app -f db/grants.sql
+          psql -h 127.0.0.1 -U erp_migrator -d hardware_erp_test -v ON_ERROR_STOP=1 -c "CREATE ROLE erp_documents LOGIN PASSWORD 'synthetic-ci-document-only' NOSUPERUSER NOCREATEDB NOCREATEROLE"
+          psql -h 127.0.0.1 -U erp_migrator -d hardware_erp_test -v document_role=erp_documents -f db/document-worker-grants.sql
+      - name: Build isolated renderer from this checkout
+        run: docker build -f renderer/Dockerfile -t hardware-erp-renderer:phase5b .
+      - name: Actual isolated document runtime and private storage
+        env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs', DOCUMENT_RUNTIME_MODE: synthetic-local, DOCUMENT_SAMPLE_DIR: '${{ runner.temp }}/document-samples'}
+        run: node --test scripts/test-document-runtime.cjs renderer/tests/render.test.cjs
       - name: Database, security, containment and financial regressions
         env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
         run: npm test --prefix backend
@@ -98,14 +111,25 @@ jobs:
         env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
         run: |
           sudo apt-get update
-          sudo apt-get install -y postgresql-16 nginx
+          sudo apt-get install -y postgresql-16 nginx poppler-utils
           export PATH="/usr/lib/postgresql/16/bin:$PATH"
           sh scripts/test-db-tls.sh
           node scripts/run-local-tests.cjs --test scripts/test-nginx.js
+      - name: Verify actual PDF contents and rendered pages
+        run: python3 scripts/test-document-runtime-output.py "$RUNNER_TEMP/document-samples"
+      - name: Preserve synthetic document output evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: document-samples-${{ github.sha }}
+          path: ${{ runner.temp }}/document-samples/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Dependency scan (high severity gate; moderate findings remain documented)
         run: |
           npm audit --prefix backend --audit-level=high
           npm audit --prefix frontend --audit-level=high
+          npm audit --prefix renderer --audit-level=high
       - name: Install pinned secret scanner
         run: |
           curl --fail --silent --show-error --location https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz

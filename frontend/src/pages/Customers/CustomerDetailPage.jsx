@@ -12,6 +12,7 @@ import dayjs from 'dayjs';
 import { getCustomer, getCustomerLedger, getCustomerSummary } from '../../api/customers.api';
 import { formatINR, formatDate } from '../../utils/formatCurrency';
 import CustomerFormModal from './CustomerFormModal';
+import DocumentsPanel from '../../components/Documents/DocumentsPanel.jsx';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -293,6 +294,8 @@ export default function CustomerDetailPage() {
           </Card>
         </Col>
       </Row>
+
+      <DocumentsPanel key={`customer-${id}`} sourceType="customer_statement" sourceId={id} />
 
       {/* Ledger Section — full width */}
       <Card id="customer-ledger" title="Original Customer Ledger" style={{ marginTop: 24 }}>

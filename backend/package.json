@@ -7,16 +7,17 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "worker": "node worker.js",
-    "test": "npm run test:environment && npm run test:security && npm run test:containment && npm run test:financial",
+    "test": "npm run test:environment && npm run test:security && npm run test:containment && npm run test:financial && npm run test:documents",
     "test:security": "node ../scripts/run-local-tests.cjs --test tests/security/*.test.js",
     "test:containment": "node ../scripts/run-local-tests.cjs --test tests/containment/*.test.js",
     "test:environment": "node ../scripts/run-local-tests.cjs --test tests/environment/*.test.js",
     "test:release-blockers": "node ../scripts/run-local-tests.cjs --test tests/release-blockers/*.test.js",
     "migrate": "node ../db/migrations/index.js",
     "seed:test": "node ../db/seeds/index.js",
-    "lint": "eslint src server.js worker.js scripts tests",
+    "lint": "eslint src server.js worker.js document-worker.js scripts tests",
     "check:syntax": "node scripts/check-syntax.js",
-    "test:financial": "node ../scripts/run-local-tests.cjs --test tests/phase2/*.test.js tests/phase3/*.test.js tests/phase4/*.test.js tests/financial/*.test.js"
+    "test:financial": "node ../scripts/run-local-tests.cjs --test tests/phase2/*.test.js tests/phase3/*.test.js tests/phase4/*.test.js tests/financial/*.test.js",
+    "test:documents": "node ../scripts/run-local-tests.cjs --test tests/phase5b/*.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.500.0",

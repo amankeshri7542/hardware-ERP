@@ -1,5 +1,9 @@
 # CLAUDE.md — UMA Enterprises ERP
 
+## Current candidate context
+
+Phase5B synthetic document implementation supersedes the older phase-boundary notes below. Read `docs/PHASE-5B-REPORT.md`, `docs/DOCUMENT-DELIVERY-CONTRACT.md` and `docs/RELEASE-BLOCKERS.md` for current measured scope. Rebuilt documents require explicit synthetic-local mode; legacy PDF routes, attachments, cashier billing and production activation remain disabled. Historical sections are not current defect or rollout status.
+
 ## Quick Orientation
 
 **Project:** Hardware & Building Materials ERP for a single-location shop in Bihar, India

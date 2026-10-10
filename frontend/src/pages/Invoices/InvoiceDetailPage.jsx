@@ -13,6 +13,7 @@ import { getInvoicePayments } from '../../api/payments.api';
 import { formatINR, formatDate } from '../../utils/formatCurrency';
 import ReturnModal from '../../components/ReturnModal/ReturnModal';
 import PaymentModal from '../../components/PaymentModal/PaymentModal';
+import DocumentsPanel, { useDocumentCapabilities } from '../../components/Documents/DocumentsPanel.jsx';
 
 const { Title, Text } = Typography;
 
@@ -25,6 +26,7 @@ const PAYMENT_MODE_LABELS = {
 export default function InvoiceDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const documentCapabilities=useDocumentCapabilities();
 
   const [invoice, setInvoice] = useState(null);
   const [payments, setPayments] = useState([]);
@@ -182,12 +184,12 @@ export default function InvoiceDetailPage() {
         </Col>
         <Col>
           <Space>
-            <Tooltip title="PDF downloads are temporarily unavailable while safety checks are completed">
+            {!documentCapabilities?.enabled && <><Tooltip title="PDF downloads are temporarily unavailable while safety checks are completed">
               <Button icon={<DownloadOutlined />} disabled>PDF unavailable</Button>
             </Tooltip>
             <Tooltip title="Print">
               <Button icon={<PrinterOutlined />} disabled>Print unavailable</Button>
-            </Tooltip>
+            </Tooltip></>}
             {isReturnable && (
               <Button
                 icon={<RollbackOutlined />}
@@ -209,6 +211,8 @@ export default function InvoiceDetailPage() {
           </Space>
         </Col>
       </Row>
+
+      <DocumentsPanel key={`invoice-${id}`} sourceType="invoice" sourceId={id} credit={isCredit} />
 
       {/* Invoice info + Customer info */}
       <Row gutter={16} style={{ marginBottom: 16 }}>

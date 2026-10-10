@@ -28,6 +28,12 @@ async function disposableDatabase(label) {
     const sql = readFileSync(path.join(root,'db/grants.sql'),'utf8')
       .replace(/^\\set[^\n]*\n/gm,'').replaceAll(':"app_role"',`"${role}"`);
     await fresh.query(sql);
+    if (process.env.TEST_DOCUMENT_WORKER_USER) {
+      assert.match(process.env.TEST_DOCUMENT_WORKER_USER, /^[a-zA-Z_][a-zA-Z0-9_]*$/);
+      const workerGrants = readFileSync(path.join(root,'db/document-worker-grants.sql'),'utf8')
+        .replace(/^\\set[^\n]*\n/gm,'').replaceAll(':"document_role"',`"${process.env.TEST_DOCUMENT_WORKER_USER}"`);
+      await fresh.query(workerGrants);
+    }
   } finally { await fresh.end(); }
   process.env.DB_NAME=name;
   return name;

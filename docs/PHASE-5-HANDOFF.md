@@ -1,3 +1,5 @@
+> Historical handoff. Its development stop/no-push sequencing was superseded by the current Phase5B request; original evidence below is unchanged. Use PHASE-5B-REPORT and PHASE-5C-HANDOFF for the active candidate.
+
 # Handoff after Phase 4 — no Phase 5 implementation authorized
 
 Preserve this candidate and its migration journal. Read `PHASE-4-REPORT.md`, `PHASE-4-TEST-EVIDENCE.md`, `PHASE-4-CHANGE-MANIFEST.md`, `FINANCIAL-SETTLEMENT-CONTRACT.md` and `RELEASE-BLOCKERS.md` before further work. Phase 4 is local operational recordkeeping, not provider execution, statutory accounts or production approval.

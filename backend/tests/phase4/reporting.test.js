@@ -1,7 +1,7 @@
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { app, request, pool, setupActor, post, fixtureProduct, fixtureCustomer, close } = require('../helpers/financial');
+const { app, request, pool, setupActor, post, diagnoseResponse, fixtureProduct, fixtureCustomer, close } = require('../helpers/financial');
 after(close);
 async function get(path) { const actor = await setupActor(); return request(app).get(`/api${path}`).set('Cookie', actor.cookie); }
 async function supplierHistory() {

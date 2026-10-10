@@ -182,7 +182,18 @@ async function select(page,label,text) {
     const option=popup.locator('.ant-select-item-option-content').filter({hasText:text});
     await expect(option).toHaveCount(1);await expect(option).toHaveText(text);
     const chosenText=(await option.innerText()).trim();
-    await option.click();
+    // Select through the combobox so scrolling a long form cannot occlude its portal popup.
+    const count=await popup.locator('.ant-select-item-option-content').count();
+    let matched=false;
+    for(let step=0;step<=count;step++) {
+      const active=await combobox.getAttribute('aria-activedescendant');
+      if(active && await page.locator(`[id=${JSON.stringify(active)}]`).getAttribute('aria-label')===chosenText){matched=true;break;}
+      await combobox.press('ArrowDown');
+      if(active) await expect(combobox).not.toHaveAttribute('aria-activedescendant',active);
+      else await expect(combobox).toHaveAttribute('aria-activedescendant',/.+/);
+    }
+    assert.ok(matched,'Keyboard active option must match the exact requested label');
+    await combobox.press('Enter');
     await expect(combobox).toHaveAttribute('aria-expanded','false');
     await expect(page.locator('.ant-select').filter({has:combobox}).locator('.ant-select-selection-item')).toHaveText(chosenText);
   } catch(error) {

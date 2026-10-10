@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 const request = require('supertest');
@@ -43,7 +43,17 @@ async function post(path, body, { actor, key = randomUUID(), operationActor } = 
   let call = request(app).post(path.startsWith('/api/') ? path : `/api${path}`).set('Origin', origin).set('Cookie', actor.cookie).set('X-Forwarded-For', actor.ip);
   if (key !== null) call = call.set('Idempotency-Key', key);
   if (operationActor !== null) call = call.set('Idempotency-Actor', String(operationActor === undefined ? actor.id : operationActor));
-  return call.send(body);
+  return diagnoseResponse(await call.send(body), { method: 'POST', path, key, actor: actor.id });
+}
+function diagnoseResponse(response, intent) {
+  if (!String(response.headers?.['content-type'] || '').includes('application/json')) {
+    const bytes = Buffer.from(response.text || '');
+    console.error(JSON.stringify({ event:'test.unexpected_non_json_response', ...intent,
+      status:response.status, headers:Object.fromEntries(['content-type','content-length','connection','x-request-id'].filter(key=>response.headers?.[key]).map(key=>[key,response.headers[key]])),
+      bytes:bytes.length, sha256:createHash('sha256').update(bytes).digest('hex'), complete:response.res?.complete,
+      localPort:response.res?.socket?.localPort, remotePort:response.res?.socket?.remotePort }));
+  }
+  return response;
 }
 async function fixtureCustomer(overrides = {}) {
   const { rows: [{ id }] } = await ownerPool.query("SELECT nextval(pg_get_serial_sequence('customers','id'))::integer AS id");
@@ -72,4 +82,4 @@ async function close() {
   }
   await Promise.all([ownerPool.end(), appPool.end()]);
 }
-module.exports = { app, request, pool: ownerPool, ownerPool, appPool, origin, setupActor, post, fixtureCustomer, fixtureProduct, close };
+module.exports = { app, request, pool: ownerPool, ownerPool, appPool, origin, setupActor, post, diagnoseResponse, fixtureCustomer, fixtureProduct, close };

@@ -1,0 +1,12 @@
+const router=require('express').Router();
+const asyncHandler=require('../../utils/asyncHandler');
+const actor=require('../../middleware/requireFinancialActor');
+const service=require('./documents.service');
+router.use((_req,res,next)=>{res.set('Cache-Control','private, no-store');res.set('X-Content-Type-Options','nosniff');next();});
+router.get('/capabilities',(_req,res)=>res.json({success:true,data:{enabled:require('./config').enabled(),formats:['a4','thermal80'],source_types:['invoice','payment','customer_statement']}}));
+router.get('/',asyncHandler(async(req,res)=>res.json({success:true,data:await service.listDocuments(req.query)})));
+router.post('/',actor,asyncHandler(async(req,res)=>{const result=await service.requestDocument(req.body,req.user.id,req.get('Idempotency-Key'));res.status(result.status).json(result.body);}));
+router.get('/:id/download',asyncHandler(async(req,res)=>{const file=await service.downloadDocument(req.params.id);res.set('Content-Type','application/pdf');res.set('Content-Disposition',`attachment; filename="${file.filename}"`);res.send(file.buffer);}));
+router.post('/:id/retry',actor,asyncHandler(async(req,res)=>{const result=await service.retryDocument(req.params.id,req.user.id,req.get('Idempotency-Key'),req.body);res.status(result.status).json(result.body);}));
+router.get('/:id',asyncHandler(async(req,res)=>res.json({success:true,data:await service.getDocument(req.params.id)})));
+module.exports=router;

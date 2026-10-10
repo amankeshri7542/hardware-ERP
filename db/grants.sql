@@ -17,5 +17,10 @@ REVOKE INSERT, UPDATE, DELETE ON shop_finance_config FROM :"app_role";
 GRANT UPDATE (id) ON settlement_events, supplier_payables, anonymous_return_liabilities,
   sales_return_applications TO :"app_role";
 REVOKE INSERT, UPDATE, DELETE ON users FROM :"app_role";
+REVOKE ALL ON document_sources,document_jobs,document_requests FROM :"app_role";
+GRANT SELECT,INSERT ON document_sources,document_requests TO :"app_role";
+GRANT SELECT ON document_jobs TO :"app_role";
+GRANT INSERT(id,source_snapshot_id,layout,template_version,status,error_code) ON document_jobs TO :"app_role";
+GRANT EXECUTE ON FUNCTION request_document_retry(UUID),invalidate_document_artifact(UUID,TEXT) TO :"app_role";
 -- New tables receive no automatic grants; review privileges after each migration.
 COMMIT;

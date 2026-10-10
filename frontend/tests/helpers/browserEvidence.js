@@ -38,7 +38,7 @@ export async function downloadFile(t, download, name) {
 
 export async function observe(t, context, { secrets = [], fixtures, control } = {}) {
   const credentials = [...secrets, process.env.SESSION_SECRET, process.env.DB_PASSWORD,
-    process.env.FIXTURE_DB_PASSWORD, process.env.TEST_APP_DB_PASSWORD].filter(Boolean);
+    process.env.FIXTURE_DB_PASSWORD, process.env.TEST_APP_DB_PASSWORD, process.env.TEST_DOCUMENT_WORKER_PASSWORD, process.env.DOCUMENT_DB_PASSWORD].filter(Boolean);
   const redact = value => {
     let text = String(value);
     for (const secret of credentials) text = text.replaceAll(secret, '[REDACTED]');
@@ -83,7 +83,7 @@ export async function observe(t, context, { secrets = [], fixtures, control } = 
           body.querySelectorAll('script,style,input[type=password]').forEach(node => node.remove());
           body.querySelectorAll('input').forEach(node => node.removeAttribute('value'));
           return { path: location.pathname, dom: body.outerHTML,
-            intents: Object.fromEntries(Object.keys(localStorage).filter(key => key.startsWith('hardware-erp-intent-v1:')).map(key => [key, JSON.parse(localStorage.getItem(key))])) };
+            intents: Object.fromEntries(Object.keys(localStorage).filter(key => key.startsWith('hardware-erp-intent-v1:') || key.startsWith('hardware-erp-document-intent-v1')).map(key => [key, JSON.parse(localStorage.getItem(key))])) };
         });
         await writeFile(path.join(directory, `page-${index}.json`), redact(JSON.stringify(state, null, 2)));
         await writeFile(path.join(directory, `page-${index}.aria.txt`), redact(await page.locator('body').ariaSnapshot()));
@@ -95,12 +95,15 @@ export async function observe(t, context, { secrets = [], fixtures, control } = 
       const operations = (await fixtures.query(`SELECT actor_id,operation,key,request_hash,status_code,
         response_body->'data'->>'id' AS record_id,response_body->'data'->>'invoice_id' AS invoice_id,
         response_body->'data'->'record'->>'id' AS settlement_id FROM idempotency_keys WHERE key=ANY($1::text[])`, [keys])).rows;
+      const documentTables = (await fixtures.query("SELECT to_regclass('document_requests') IS NOT NULL AS exists")).rows[0].exists;
+      const documents = documentTables ? (await fixtures.query(`SELECT r.actor_id,r.operation,r.key,r.job_id,j.status,j.attempts,j.lease_token,j.error_code,j.artifact_sha256,j.artifact_bytes
+        FROM document_requests r JOIN document_jobs j ON j.id=r.job_id WHERE r.key=ANY($1::text[])`, [keys])).rows : [];
       const actors = [...new Set(operations.map(row => row.actor_id))];
       const payments = (await fixtures.query('SELECT id,customer_id,invoice_id,amount,mode,payment_date FROM payments WHERE created_by=ANY($1::int[]) ORDER BY id', [actors])).rows;
       const settlements = (await fixtures.query('SELECT id,kind,source_type,source_id,customer_id,supplier_id,amount,date FROM settlement_events WHERE created_by=ANY($1::int[]) ORDER BY id', [actors])).rows;
       const locks = (await fixtures.query(`SELECT pid,state,wait_event_type,wait_event,pg_blocking_pids(pid) AS blockers
         FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()`)).rows;
-      await writeFile(path.join(directory, 'database.json'), JSON.stringify({ database: process.env.DB_NAME, operations, payments, settlements, locks }, null, 2));
+      await writeFile(path.join(directory, 'database.json'), JSON.stringify({ database: process.env.DB_NAME, operations, documents, payments, settlements, locks }, null, 2));
     });
     if (tracing) await attempt(async () => {
       const privateDirectory = await mkdtemp(path.join(tmpdir(), 'hardware-private-trace-'));

@@ -142,3 +142,13 @@ raw passwords, tokens, cookies, connection strings, request bodies or validation
 values. Run the redacted local scanner with `python3 scripts/scan-secrets.py` and
 the history check with `--history` after installing the pinned Gitleaks version.
 See `PHASE-1-REPORT.md` for exact measured results and outstanding tooling gates.
+
+## Phase5B document containment and recovery
+
+Synthetic-only safe document delivery is separate from old PDF routes and supplier attachments, which remain denied. No production activation is authorized. Preserve both historical credential disclosures and unknown recovery/concurrency incidents; current scans/tests are not rotation or attribution evidence.
+
+Use migration022 together with forward023: privileged retry/invalidation functions explicitly place pg_temp after pg_catalog and the trusted schema. Restricted-role shadow-table tests must pass. API credentials cannot publish artifacts; worker credentials cannot read financial/session/user tables. Renderer children receive neither credential set.
+
+For missing private bytes, current authenticated download marks the exact published hash unavailable; explicit original-key document recovery may regenerate identical content within3 attempts. A failed or timed-out financial response is recovered through its original financial key, never by issuing another sale for a PDF. Preserve all immutable source/request/job hashes and published metadata. Hash mismatch, exhausted attempts or unexplained historical facts need a reviewed forward fix; no blanket reset, delete or backfill. Restore storage/worker services only in the authorized environment.
+
+The cleanup/publication advisory barrier is mandatory. Do not manually remove referenced artifacts or run cleanup from a stale exported key list. Do not expose the private storage root via nginx/static middleware. Native macOS sandbox proof has a V8-heap/CPU bound, not a total-process cgroup memory guarantee; Linux container proof and physical printer acceptance are distinct gates. Cloud storage/IAM, provider execution, attachments and cashier rollout remain unavailable.

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
-  Table, Button, Tag, DatePicker, Select, Input, Typography, Row, Col, Card, Space, Spin, message,
+  Table, Button, Tag, DatePicker, Select, Input, Typography, Row, Col, Card, Space, Spin, message, Modal,
 } from 'antd';
 import {
   PlusOutlined, SearchOutlined, DollarOutlined,
@@ -9,6 +10,7 @@ import dayjs from 'dayjs';
 import { listPayments } from '../../api/payments.api';
 import { formatINR, formatDate } from '../../utils/formatCurrency';
 import PaymentModal from '../../components/PaymentModal/PaymentModal';
+import DocumentsPanel, { useDocumentCapabilities } from '../../components/Documents/DocumentsPanel.jsx';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -41,6 +43,9 @@ const MODE_LABELS = {
 };
 
 export default function PaymentsPage() {
+  const capabilities=useDocumentCapabilities();
+  const [searchParams,setSearchParams]=useSearchParams();
+  const receiptId=/^[1-9]\d*$/.test(searchParams.get('receipt') || '')?searchParams.get('receipt'):null;
   // Filters
   const [dateRange, setDateRange] = useState(() => [
     dayjs().startOf('month'),
@@ -172,7 +177,8 @@ export default function PaymentsPage() {
       ellipsis: true,
       render: (val) => val || 'Admin',
     },
-  ], []);
+    ...(capabilities?.enabled ? [{title:'Receipt',render:(_,row)=><Button onClick={()=>setSearchParams({receipt:String(row.id)})}>Receipt document</Button>}] : []),
+  ], [capabilities?.enabled,setSearchParams]);
 
   return (
     <div style={{ padding: 24 }}>
@@ -271,6 +277,10 @@ export default function PaymentsPage() {
           locale={{ emptyText: 'No payments found' }}
         />
       </Card>
+
+      <Modal title="Customer receipt document" open={Boolean(receiptId && capabilities?.enabled)} onCancel={()=>setSearchParams({})} footer={null} width={1000} destroyOnClose>
+        {receiptId && <DocumentsPanel key={`payment-${receiptId}`} sourceType="payment" sourceId={receiptId} />}
+      </Modal>
 
       {/* Payment Modal — standalone (no invoice context) */}
       <PaymentModal

@@ -112,7 +112,13 @@ test('actual historical schema upgrade preserves invoices and append-only ledger
     }
     const through15={};
     for(const table of Object.keys(snapshots)) through15[table]=(await client.query(`SELECT * FROM ${table} ORDER BY id`)).rows;
-    assert.deepEqual(await runMigrations(client), ['016','017','018','019','020','021']);
+    assert.deepEqual(await runMigrations(client, { through: '021' }), ['016','017','018','019','020','021']);
+    await client.query("INSERT INTO idempotency_keys(actor_id,operation,key,request_hash,status_code,response_body) VALUES($1,'invoice.create','preserved-upgrade-key',$2,201,$3)", [user.id,'a'.repeat(64),{success:true,data:{invoice_id:invoice.id,proof:'unchanged original result'}}]);
+    const beforeDocuments={};
+    for(const table of [...Object.keys(snapshots),'idempotency_keys']) beforeDocuments[table]=(await client.query(`SELECT * FROM ${table}`)).rows;
+    assert.deepEqual(await runMigrations(client), ['022','023']);
+    for(const [table,rows] of Object.entries(beforeDocuments)) assert.deepEqual((await client.query(`SELECT * FROM ${table}`)).rows,rows,'Document migration preserves every existing column in '+table);
+    assert.equal((await client.query('SELECT count(*)::int AS n FROM document_sources')).rows[0].n,0,'No invented historical seller snapshot');
     for(const [table,rows] of Object.entries(through15)) {
       const current=(await client.query(`SELECT * FROM ${table} ORDER BY id`)).rows;
       assert.deepEqual(current.map(row=>Object.fromEntries(Object.keys(rows[0]||{}).map(key=>[key,row[key]]))),rows,'Historical columns remain unchanged in '+table);

@@ -130,3 +130,13 @@ Current Linux workflow execution remains unverified despite native61/61. See `PH
 ## 2026-10-10 development sequencing update
 
 The latest Phase5B request supersedes the previous no-push/development-stop instructions above for this task only. Independently safe document development is authorized while historical incidents remain owner-pending; reviewed development-branch checkpoint pushes may obtain Linux CI. No production approval or deployment is authorized. See PHASE-5B-PLAN.md and INCIDENT-REGISTER.md for current scope; prior reports remain dated evidence.
+
+## Phase5B synthetic document verification
+
+Only the isolated development candidate is authorized. The prior design-only/no-push sequencing is superseded by the current branch-only CI permission; historical incident and production gates remain. Migration022 creates document evidence and023 explicitly hardens privileged function search paths. Never edit applied migration bytes or retrofit historical seller snapshots.
+
+After ordinary migrations/grants, create a separate synthetic NOSUPERUSER/NOCREATEDB/NOCREATEROLE worker role and apply `db/document-worker-grants.sql` with psql variable `document_role`. API role uses `db/grants.sql`. Fixture role may create disposable databases; application/worker processes must use restricted roles. `TEST_DOCUMENT_WORKER_USER/PASSWORD` lets the clean browser/database helpers provision these grants. Never use live dotenv.
+
+Every application/test/build Node process preloads `scripts/local-only-network.cjs`. Mode requires NODE_ENV=test, DOCUMENT_RUNTIME_MODE=synthetic-local and DOCUMENT_RENDERER_DRIVER=macos-sandbox on supported macOS, or docker after the reviewed renderer image is built. DOCUMENT_ARTIFACT_ROOT must be an owned canonical0700 directory outside source. Explicit synthetic seller settings require DOCUMENT_SELLER_CONFIRMED=true plus STORE_NAME/ADDRESS/GSTIN; missing facts block documents. Production always denies this path.
+
+`node backend/document-worker.js --once` processes at most one leased job with DOCUMENT_DB_USER/PASSWORD distinct from DB_USER; `--cleanup` removes only aged owned unreferenced objects under the shared publication lock. Run `npm test --prefix backend`, original `test:release-blockers`, frontend auth/financial/build/browser-all, and isolated renderer/output suites as documented in PHASE-5B-TEST-EVIDENCE. Dependencies and advisory/GitHub tooling use separate non-application retrieval environments. Browser guards precede navigation and block external redirects, sockets and service workers.
