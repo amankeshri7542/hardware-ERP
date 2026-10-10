@@ -116,3 +116,17 @@ Run `npm run test:release-blockers --prefix backend` and `python3 scripts/scan-s
 `docker-compose.production.yml` is a template, not approval. Configure `backend/.env.production` with a verified external DB hostname, CA and least-privilege app credentials, HTTPS CORS origin, session secret and other required values. It sets `DB_SSL_CA_PATH=/run/certs/db-ca.pem` to match the CA mount. Mount certificate/key paths readable by nginx uid 101. Non-root nginx uses 8080/8443 internally; only 80/443 are published. API and Redis have no published ports. The API trusts only nginx's fixed private-network address; native nginx deployments should trust only their actual loopback proxy addresses.
 
 The API image runs as `node`; nginx runs as uid 101. Secrets, local uploads, dependencies and generated artifacts are excluded from Docker context. PDFs/uploads remain disabled even though writable directories are prepared. Public HTTPS, DNS/cert renewal, image execution, live credentials/rotation, branch protection, backup/restore and production rollout remain unverified operator actions. Do not use the old deployment script: it now exits with a clear release-blocked message.
+
+
+## Stabilization browser isolation and evidence
+
+Use `npm run test:browser-all --prefix frontend` for all61 current browser cases, or the individual browser scripts. These scripts create a new uniquely named disposable `_test` database using fixture-owner credentials, replay real migrations/grants and run API requests as the restricted application role. Backend negative fixtures remain intact in their own book. Never truncate a shared database or bypass CASH_RECONCILIATION_REQUIRED. Supply TEST_APP_DB_USER/TEST_APP_DB_PASSWORD plus fixture owner via DB_USER/DB_PASSWORD (or FIXTURE_DB_USER/FIXTURE_DB_PASSWORD if runtime DB_USER is restricted).
+
+Keep NODE_OPTIONS preloading the absolute `scripts/local-only-network.cjs` before all test/build processes; browser route/redirect/WebSocket/service-worker guards precede navigation. Use synthetic credentials and no live .env. BROWSER_ARTIFACT_ROOT may name an absolute owned artifact root; default uses os.tmpdir. Download paths are per-test owned directories. Only sanitized browser evidence is publishable; raw traces are private temporary files removed after allowlisted conversion. The diagnostic self-check deliberately fails three child cases and passes only if failures propagate and all published output excludes the credential canary. Run the separate cash-isolation control as well; commands are in `PHASE-5-TEST-EVIDENCE.md`.
+
+Current Linux workflow execution remains unverified despite native61/61. See `PHASE-4-STABILIZATION-REPORT.md`; do not enable document runtime or publish this unstaged candidate to obtain a green badge without new authorization.
+
+
+## 2026-10-10 development sequencing update
+
+The latest Phase5B request supersedes the previous no-push/development-stop instructions above for this task only. Independently safe document development is authorized while historical incidents remain owner-pending; reviewed development-branch checkpoint pushes may obtain Linux CI. No production approval or deployment is authorized. See PHASE-5B-PLAN.md and INCIDENT-REGISTER.md for current scope; prior reports remain dated evidence.

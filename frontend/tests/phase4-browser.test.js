@@ -1,4 +1,5 @@
-import { test, before, after } from 'node:test';
+import { test, observe, downloadFile } from './helpers/browserEvidence.js';
+import { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomUUID, randomInt } from 'node:crypto';
@@ -83,6 +84,7 @@ async function session(t) {
   const attempted = new Set();
   const context = await browser.newContext({ serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': `127.0.0.${++sessionNumber}` } });
   const control = { drop: null, requests: [], catalogRequests: [] };
+ const evidence = await observe(t, context, { fixtures, control, secrets: [password] });
   await context.routeWebSocket('**/*', socket => { attempted.add('websocket'); socket.close(); });
   const guardedRequests = new Set();
   await context.route('**/*', route => {
@@ -96,6 +98,14 @@ async function session(t) {
     }
     if (request.method() === 'PUT' && /^\/api\/products\/\d+$/.test(url.pathname)) control.catalogRequests.push(request.postDataJSON());
     const response = await route.fetch({ maxRedirects: 0, maxRetries: 0 });
+    const held = control.holdResponse;
+    if (held && request.method() === 'POST' && request.headers()['idempotency-key'] === held.key && response.status() === held.status) {
+      held.started = true;
+      await held.gate;
+      if (control.holdResponse === held) control.holdResponse = null;
+      if (held.cancel) return route.abort('failed');
+    }
+
     if (control.holdDay && url.pathname === '/api/finance/days' && url.searchParams.get('date') === control.holdDay.date) { control.holdDay.started = true; await control.holdDay.gate; }
     if (control.holdQuote && url.pathname === '/api/finance/customer/quote' && request.postDataJSON().source_id === control.holdQuote.sourceId) { control.holdQuote.started = true; await control.holdQuote.gate; }
     const location = response.headers().location;
@@ -110,13 +120,11 @@ async function session(t) {
     guardedRequests.add(pending);
     return pending.finally(() => guardedRequests.delete(pending));
   });
-  t.after(() => assert.equal(attempted.size, 0, 'No external browser request or WebSocket may be attempted'));
-  t.after(async () => { control.holdDay?.release?.(); control.holdQuote?.release?.(); while (guardedRequests.size) await Promise.all([...guardedRequests]); await context.close(); });
+  const runtimeErrors = [];
+  t.after(async () => { await evidence.finish(async () => { control.holdResponse?.release?.(); control.holdDay?.release?.(); control.holdQuote?.release?.(); while (guardedRequests.size) await Promise.all([...guardedRequests]); assert.equal(attempted.size, 0, 'No external browser request or WebSocket may be attempted'); assert.deepEqual(runtimeErrors, []); }); });
   const page = await context.newPage();
   page.setDefaultTimeout(12000);
-  const runtimeErrors = [];
   page.on('pageerror', error => runtimeErrors.push(error.message));
-  t.after(() => assert.deepEqual(runtimeErrors, []));
   await login(page);
   return { page, context, control };
 }
@@ -179,7 +187,6 @@ async function select(page,label,text) {
     await expect(page.locator('.ant-select').filter({has:combobox}).locator('.ant-select-selection-item')).toHaveText(chosenText);
   } catch(error) {
     console.error('Phase4 select failure',JSON.stringify({label,expected:String(text),controls,combobox:await combobox.evaluate(node=>node.outerHTML).catch(()=>null),popups:await page.locator('.ant-select-dropdown').evaluateAll(nodes=>nodes.map(node=>({visible:!!node.getClientRects().length,html:node.outerHTML}))).catch(()=>[])}));
-    await page.screenshot({path:`/private/tmp/phase4-select-failure-${label.replace(/[^a-z0-9]+/gi,'-')}.png`,fullPage:true}).catch(()=>{});
     throw error;
   }
 }
@@ -276,6 +283,17 @@ async function prepare(kind,page,context,f) {
 async function switchAccount(page,identity) {
   await page.goto(`${origin}/dashboard`); await expect(page.getByRole('heading',{name:'Dashboard',exact:true})).toBeVisible(); await page.getByRole('button',{name:/Logout$/}).click();await page.waitForURL(`${origin}/login`);await login(page,identity);
 }
+const matchesOperation = (response, original) => {
+ const request = response.request();
+ return new URL(response.url()).pathname === original.path && request.method() === 'POST'
+  && request.headers()['idempotency-key'] === original.key
+  && request.headers()['idempotency-actor'] === original.actor;
+};
+function holdResponse(control, key, status, cancel = false) {
+ let release;
+ const gate = new Promise(resolve => { release = resolve; });
+ return control.holdResponse = { key, status, cancel, gate, release, started: false };
+}
 async function recover(page,context,control,command) {
  let lastResponse = null;
  try {
@@ -286,14 +304,17 @@ async function recover(page,context,control,command) {
   await page.reload(); await page.getByRole('button',{name:command.open,exact:true}).first().click();
   assert.equal(control.requests.length,1,'Reload must not replay');
   const other=await context.newPage();other.setDefaultTimeout(12000);await switchAccount(other,otherEmail);
-  const [rejected]=await Promise.all([page.waitForResponse(res=>new URL(res.url()).pathname===command.path && res.request().method()==='POST'),page.getByRole('button',{name:'Retry saved operation',exact:true}).click()]);
+  const [rejected]=await Promise.all([page.waitForResponse(res=>matchesOperation(res,original)),page.getByRole('button',{name:'Retry saved operation',exact:true}).click()]);
   lastResponse={status:rejected.status(),code:(await rejected.json()).code};
   assert.equal(lastResponse.status,409);assert.equal(lastResponse.code,'OPERATION_ACTOR_MISMATCH');
   assert.equal((await savedIntent(page,command.operation)).status,'uncertain');assert.equal(await savedIntent(page,command.operation,otherUserId),null);
   assert.deepEqual(control.requests[1],original);
   await switchAccount(other,email);assert.equal(control.requests.length,2,'Account switching must not replay');
   await expect(page.getByRole('button',{name:'Retry saved operation',exact:true})).toHaveAttribute('aria-label','Retry saved operation');
-  await page.getByRole('button',{name:'Retry saved operation',exact:true}).click();
+  const retry=page.getByRole('button',{name:'Retry saved operation',exact:true});
+  await expect(retry).not.toHaveClass(/ant-btn-loading/);
+  const [replayed]=await Promise.all([page.waitForResponse(res=>matchesOperation(res,original)),retry.click()]);
+  assert.equal(replayed.status(),201);
   await expect.poll(async()=>(await savedIntent(page,command.operation))?.status).toBe('completed');
   assert.deepEqual(control.requests[2],original);await command.verify(original);return (await savedIntent(page,command.operation)).result;
  } catch(error) { console.log(JSON.stringify({recoveryFailure:{operation:command.operation,path:command.path,lastResponse,requests:control.requests,intent:await savedIntent(page,command.operation),buttons:await page.locator('button').filter({hasText:'Retry saved operation'}).evaluateAll(buttons=>buttons.map(button=>({html:button.outerHTML,busyRendered:button.classList.contains('ant-btn-loading'),disabled:button.disabled})))}}));throw error; }
@@ -308,6 +329,56 @@ for(const kind of ['customer-advance','customer_allocation','customer_refund','c
   });
 }
 
+
+
+for (const kind of ['customer-advance', 'supplier_refund_reversal']) {
+ test(`Phase4 controlled delayed rejection, cancelled replay and two-tab recovery: ${kind}`, async t => {
+  const f=await seed(); const {page,context,control}=await session(t); const command=await prepare(kind,page,context,f);
+  control.drop=command.path;
+  await page.getByRole('button',{name:command.commit,exact:true}).click();
+  await expect.poll(async()=>(await savedIntent(page,command.operation))?.status).toBe('uncertain');
+  const original=control.requests[0]; await command.verify(original);
+  await page.reload(); await page.getByRole('button',{name:command.open,exact:true}).first().click();
+  const other=await context.newPage(); other.setDefaultTimeout(12000); await switchAccount(other,otherEmail);
+  const heldWrong=holdResponse(control,original.key,409);
+  const rejected=Promise.all([page.waitForResponse(response=>matchesOperation(response,original)),
+    page.getByRole('button',{name:'Retry saved operation',exact:true}).click()]);
+  const observedRejection=rejected.then(value=>({value}),error=>({error}));
+  await expect.poll(()=>heldWrong.started).toBe(true);
+  await switchAccount(other,email);
+  await expect(page.getByRole('button',{name:'Retry saved operation',exact:true})).toHaveClass(/ant-btn-loading/);
+  heldWrong.release();
+  const rejectedResult=await observedRejection; if(rejectedResult.error) throw rejectedResult.error;
+  assert.equal(rejectedResult.value[0].status(),409);
+  assert.equal((await rejectedResult.value[0].json()).code,'OPERATION_ACTOR_MISMATCH');
+  await expect.poll(async()=>(await savedIntent(page,command.operation))?.status).toBe('uncertain');
+  await expect(page.getByRole('button',{name:'Retry saved operation',exact:true})).not.toHaveClass(/ant-btn-loading/);
+  const cancelled=holdResponse(control,original.key,201,true);
+  await page.getByRole('button',{name:'Retry saved operation',exact:true}).click();
+  await expect.poll(()=>cancelled.started).toBe(true);
+  await command.verify(original);
+  await page.reload(); cancelled.release();
+  await page.getByRole('button',{name:command.open,exact:true}).first().click();
+  assert.ok(['pending','uncertain'].includes((await savedIntent(page,command.operation)).status));
+  await other.goto(`${origin}${command.route}`);
+  await other.getByRole('button',{name:command.open,exact:true}).first().click();
+  const before=control.requests.filter(request=>request.key===original.key).length;
+  const simultaneous=holdResponse(control,original.key,201);
+  await Promise.all([page.getByRole('button',{name:'Retry saved operation',exact:true}).click(),
+    other.getByRole('button',{name:'Retry saved operation',exact:true}).click()]);
+  await expect.poll(()=>simultaneous.started).toBe(true);
+  simultaneous.release();
+  await expect.poll(async()=>(await savedIntent(page,command.operation))?.status).toBe('completed');
+  await expect(page.getByRole('button',{name:'Done',exact:true})).toBeVisible();
+  await expect(other.getByRole('button',{name:'Done',exact:true})).toBeVisible();
+  const attempts=control.requests.filter(request=>request.key===original.key);
+  assert.equal(attempts.length,before+1,'Two tabs share one recovered operation under the existing browser lock');
+  for(const attempt of attempts) assert.deepEqual(attempt,original);
+  assert.equal((await savedIntent(page,command.operation)).key,original.key);
+  await command.verify(original);
+  assert.equal((await fixtures.query('SELECT COUNT(*)::int AS count FROM idempotency_keys WHERE actor_id=$1 AND key=$2 AND status_code=201',[userId,original.key])).rows[0].count,1);
+ });
+}
 
 test('Phase4 exhausted supplier quote is editable only on original account and preserves draft',async t=>{
  const f=await seed(),other=await seed();const {page,context,control}=await session(t);const command=await prepare('supplier_payment',page,context,f);
@@ -365,7 +436,7 @@ test('Phase4 statements retain full-history balances across filters/pages and CS
  assert.equal(data.opening_balance,'200.00');assert.equal(data.closing_balance,'177.00');assert.equal(data.summary.count,23);assert.equal(data.rows.length,3);assert.equal(data.rows.at(-1).running_balance,'177.00');
  await expect(page.locator('.ant-descriptions-item-content').filter({hasText:'₹177.00'})).toBeVisible();
  await page.locator('.ant-tabs-tabpane-active').getByTitle('2',{exact:true}).click();await expect(page.locator('.ant-tabs-tabpane-active .ant-table-tbody > tr.ant-table-row')).toHaveCount(3);
- const downloaded=page.waitForEvent('download');await page.getByRole('button',{name:'Export filtered statement CSV',exact:true}).click();const download=await downloaded;const path=`/private/tmp/phase4-statement-${run}.csv`;await download.saveAs(path);const csv=await readFile(path,'utf8');assert.equal(csv.trim().split('\n').length,24);assert.match(csv,/177\.00/);
+ const downloaded=page.waitForEvent('download');await page.getByRole('button',{name:'Export filtered statement CSV',exact:true}).click();const download=await downloaded;const path=await downloadFile(t,download,'statement.csv');const csv=await readFile(path,'utf8');assert.equal(csv.trim().split('\n').length,24);assert.match(csv,/177\.00/);
  await page.goto(`${origin}/customers/${f.customer}`);
  const originalLedger=page.locator('#customer-ledger');await expect(originalLedger.getByRole('columnheader',{name:'Balance at posting',exact:true})).toBeVisible();
  await originalLedger.locator('.ant-picker').hover();
@@ -391,7 +462,7 @@ test('Phase4 financial report cards and dues filters use full server summaries',
  const {page,context}=await session(t);const f=await seed();const today=(await read(context,'/finance/days')).today;
  const sale=await api(context,'/invoices',{customer_id:f.customer,bill_type:'retail',date:today,items:[{product_id:f.product,qty:'2.000',unit:'box',rate:'100.00'}],payment:{amount_paid:'100.00',modes:[{mode:'cash',amount:'100.00'}],due_date:today}});
  const payment=await api(context,'/payments',{customer_id:f.customer,invoice_id:null,payment_date:today,amount:'20.00',mode:'cash',notes:'Synthetic report evidence'});
- const downloadSheet=async()=>{const downloaded=page.waitForEvent('download');await page.getByRole('button',{name:/Export Excel$/}).click();const download=await downloaded;const file=`/private/tmp/phase4-report-${randomUUID()}.xlsx`;await download.saveAs(file);const ExcelJS=requireBackend('exceljs');const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await readFile(file));return workbook.worksheets[0];};
+ const downloadSheet=async()=>{const downloaded=page.waitForEvent('download');await page.getByRole('button',{name:/Export Excel$/}).click();const download=await downloaded;const file=await downloadFile(t,download,'report.xlsx');const ExcelJS=requireBackend('exceljs');const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await readFile(file));return workbook.worksheets[0];};
  await page.goto(`${origin}/settlements/reports`);const summary=await read(context,'/finance/reports');await expect(page.getByText('Actual recorded money movements',{exact:true})).toBeVisible();
  for(const [label,key] of [['All money received','incoming'],['All money paid out','outgoing'],['Net money movement','net']]) {
   const cell=page.locator('tr').filter({has:page.getByText(label,{exact:true})});await expect(cell).toContainText(new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR'}).format(summary.cash[key]));

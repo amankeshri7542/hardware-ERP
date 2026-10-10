@@ -1,0 +1,10 @@
+# Phase 4 stabilization / gated Phase 5 plan
+
+Starting HEAD aebf06579d5c577ecde0837de7fe68ef59b675cf; complete tree 4a7ed30e31c4b95e40e9135c5e2ab700645f02cc. Preserve the real index, recovery refs and original checkout. This request authorizes local unstaged work only; no commit/push or remote dispatch.
+
+1. **5A / stabilization:** reproduce the reviewed Linux job's backend-to-browser sequence on a new synthetic database; record retained malformed rows and their fixture provenance. Isolate clean browser books from corrupt negative fixtures, make artifact/export paths portable, and collect sanitized first-failure evidence through actual node:test/Playwright context APIs. Use controlled recovery schedules and operation-key correlation. Run complete final-byte suites. Historical failure-time evidence that never existed cannot be reconstructed.
+2. **5A exit:** require unchanged financial invariants, clean/corrupt controls, exact-source full Linux workflow execution and an evidence-backed recovery disposition. A native macOS pass or earlier remote run is insufficient. No Docker/Podman/Colima/Lima/QEMU runtime is currently installed; no remote dispatch or privileged install is authorized. Preserve that limitation and stop runtime expansion if the mandatory gate remains blocked.
+3. **5B–5C, conditional on 5A:** immutable document DTO/version/job contract, verified renderer isolation, durable scheduling, then private bounded attachment lifecycle. No unsafe legacy path or bypass flag. If 5A remains blocked, only independent read-only document design is allowed.
+4. **5D:** independent read-only review, affected fixes and final full checks; source/build manifests, sanitized evidence, honest statuses and forward recovery. Keep PDFs/attachments/cashier billing disabled until the applicable verified gate; production always requires outstanding operator approvals.
+
+No financial policy, applied migration, historical record or production environment is changed to make a test pass. Existing migrations end at 021 (012 intentionally absent); stabilization is expected to need no migration.

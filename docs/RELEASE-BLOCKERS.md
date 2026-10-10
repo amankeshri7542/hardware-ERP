@@ -1,6 +1,6 @@
 # Release blockers
 
-Updated for Phase 4 on 2026-10-09. **Production release is BLOCKED.** Local settlement implementation and synthetic verification do not authorize deployment, historical repair or live credential actions. See `PHASE-4-REPORT.md`, `PHASE-4-TEST-EVIDENCE.md` and the preserved Phase 3 reports for scope, source identities and commands.
+Updated for checkpoint5A stabilization on 2026-10-09. **Production release is BLOCKED.** Local settlement implementation and synthetic verification do not authorize deployment, historical repair or live credential actions. See `PHASE-4-REPORT.md`, `PHASE-4-TEST-EVIDENCE.md` and the preserved Phase 3 reports for scope, source identities and commands.
 
 ## Original financial invariants
 
@@ -26,7 +26,7 @@ The suite is not exhaustive. Phase 3 also passed 193 backend, 40 frontend unit/a
 | Gate / owner | Current status and required evidence |
 |---|---|
 | Application-image and Compose runtime / engineering + operator | **BLOCKED:** Docker CLI unavailable locally. Prior user-reported starting-commit CI run 37911403467 built images; it does not prove execution. Run current immutable API/web images, migration/restricted-role startup, loopback/private networking, health and containment/recovery checks in an authorized disposable environment. |
-| Current remote CI / engineering | **PENDING current candidate:** final commit/push is authorized, but local workflow changes and earlier-commit runs do not prove a passing current remote run. Preserve independent engineering, financial and historical-secret gates. |
+| Current remote CI / engineering | **FAIL reviewed HEAD / BLOCKED new candidate:** run37937154546 at aebf0657 failed (Phase4 browsers23/26); later scans/images and dependent release job were skipped. This request forbids commit/push/dispatch, so no remote proof exists for new bytes. Preserve independent engineering, financial and historical-secret gates. |
 | Historical secrets / operator | **FAIL:** redacted local history scan still finds historical GitHub PAT and JWT disclosures. Revoke/rotate affected credentials/passwords and invalidate sessions as appropriate; inspect provider access events. Deletion or a clean current-source scan is not proof of rotation. No live rotation/history rewrite is authorized here. |
 | Live HTTPS, DB TLS, proxy and private networking / operator | **UNVERIFIED:** verify real CA/hostname, redirect/cookies, trusted proxy subnet, API/DB/Redis exposure and actual application grants. Synthetic/native prior evidence is not live evidence. |
 | Backup, restore and historical-schema adoption / operator | **UNVERIFIED:** synthetic forward upgrades passed, not a production backup/restore or live-schema adoption. Take an authorized backup, restore/reconcile a copy and review any journal adoption; never guess migration history. |
@@ -47,7 +47,7 @@ The suite is not exhaustive. Phase 3 also passed 193 backend, 40 frontend unit/a
 | Accountant/statutory acceptance | Operational financial policy, source eligibility, period/reversal rules and tax interpretation need real accountant/business acceptance. Tests are not certification. |
 | Report performance | Full evidence verification can be slow on accumulated fixtures. Verify realistic synthetic-volume performance before operational rollout. |
 
-Read-only diagnostics include `db/reconciliation/phase-4.sql`; earlier scripts remain historical phase diagnostics. The final clean supported scenario and deliberate corruption database are separate. Preserve the unresolved Phase 3 baseline 82/84 concurrency result and Phase 4 inherited-browser baseline 32/33 metadata timeout; later passing runs are not root-cause proof. Stop at Phase 4; `PHASE-5-HANDOFF.md` does not authorize Phase 5 or deployment.
+Read-only diagnostics include `db/reconciliation/phase-4.sql`; earlier scripts remain historical phase diagnostics. The final clean supported scenario and deliberate corruption database are separate. Preserve the unresolved Phase 3 baseline 82/84 concurrency result and Phase 4 inherited-browser baseline 32/33 metadata timeout; later passing runs are not root-cause proof. Latest request gates Phase5 on5A. Stop at unresolved5A; document/attachment runtime and Phase6/production remain unauthorized.
 
 ## Phase 4 recovery reliability gate
 
@@ -56,3 +56,14 @@ Read-only diagnostics include `db/reconciliation/phase-4.sql`; earlier scripts r
 A separate customer-advance wrong-actor response wait timed out in `/private/tmp/phase4-all-browser-complete.log`. Observing its click and response promise together fixed an unhandled-rejection path, and guarded-handler teardown was repaired, but neither proves the original response timeout cause. Both recovery failures remain open even though the subsequent complete selector-corrected suite passed 59/59 on a fresh database. Failure-only request/actor/key/source/target/response/DOM diagnostics are retained for a future recurrence.
 
 The inherited product-edit timeout later recurred with a visually disappearing but still accessible loading icon changing the exact button name; a stable product action label addresses that demonstrated case. Original baseline logs and separate unexplained Phase3 database concurrency failures remain retained.
+
+
+## Checkpoint5A stabilization update
+
+Native final tested tree `4d5ddbb51523cd2dba883177faee3e2a9b3399c9`: backend264/264, original invariants11/11, frontend88/88, browsers61/61, clean/corrupt control1/1, first-failure evidence control1/1, native TLS/nginx1/1 each, lint/syntax/build pass. Current complete candidate scan is clean; history still reports the two disclosures. These are actual new measurements, not inherited counts.
+
+The CI report422 failures are addressed by separately migrated clean browser books while preserving malformed negative fixtures and strict cash proof. Portable download destinations replace executable macOS temp assumptions. Sanitized pre-teardown diagnostics and CI upload are implemented; real deliberate failures prove capture and credential redaction. See `PHASE-4-STABILIZATION-REPORT.md` and `PHASE-5-TEST-EVIDENCE.md`.
+
+**5A remains BLOCKED:** exact-source full Linux workflow has not run (no Docker/Podman/Colima/Lima/QEMU; no authorized remote dispatch). The older two recovery failures and separate Phase3 concurrency uncertainty above are not retrospectively explained. Controlled delayed/cancelled/two-tab schedules pass but cannot waive missing historical evidence. No new accounting failure was observed in the final native run.
+
+**5B–5D conditional runtime not started:** read-only `DOCUMENT-DELIVERY-CONTRACT.md` and renderer decision are design only. PDFs, supplier attachments and cashier billing remain disabled. Durable document jobs, renderer isolation/output, private attachment lifecycle, document UX, cloud drivers and physical printing are unverified required work. No current image build/runtime or production acceptance is claimed. Work stays local, uncommitted and unstaged; earlier publishing permission is superseded.

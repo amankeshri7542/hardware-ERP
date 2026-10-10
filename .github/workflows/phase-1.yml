@@ -43,7 +43,7 @@ jobs:
       - name: Pin npm
         run: npm install --global npm@11.17.0
       - name: Generate isolated session key
-        run: node -e "require('fs').appendFileSync(process.env.GITHUB_ENV, 'SESSION_SECRET=' + require('crypto').randomBytes(32).toString('hex') + '\\n')"
+        run: node -e "const key=require('crypto').randomBytes(32).toString('hex'); console.log('::add-mask::'+key); require('fs').appendFileSync(process.env.GITHUB_ENV, 'SESSION_SECRET='+key+'\\n')"
       - name: Install locked dependencies
         run: |
           npm ci --prefix backend
@@ -67,6 +67,9 @@ jobs:
       - name: Database, security, containment and financial regressions
         env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
         run: npm test --prefix backend
+      - name: Clean and corrupt cash-book isolation controls
+        env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
+        run: node scripts/run-local-tests.cjs --test scripts/test-cash-fixture-isolation.cjs
       - name: Frontend auth and build
         env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs', VITE_API_URL: '/api'}
         run: |
@@ -75,15 +78,24 @@ jobs:
           NODE_ENV=production npm run build --prefix frontend
       - name: Install browser test tooling
         run: cd frontend && npx playwright install --with-deps chromium
+      - name: Browser failure-evidence and portable-download self-check
+        env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
+        run: node scripts/run-local-tests.cjs --test scripts/test-browser-evidence.cjs
       - name: Real browser auth/navigation and Phase 4 settlement recovery
         env: {TRUST_PROXY: '127.0.0.1/32,::1/128', NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
         run: |
           cd frontend
-          DB_USER=erp_app DB_PASSWORD=synthetic-ci-app-only FIXTURE_DB_USER=erp_migrator FIXTURE_DB_PASSWORD=synthetic-ci-owner-only npm run test:browser
-          DB_USER=erp_app DB_PASSWORD=synthetic-ci-app-only FIXTURE_DB_USER=erp_migrator FIXTURE_DB_PASSWORD=synthetic-ci-owner-only npm run test:financial-browser
-          DB_USER=erp_app DB_PASSWORD=synthetic-ci-app-only FIXTURE_DB_USER=erp_migrator FIXTURE_DB_PASSWORD=synthetic-ci-owner-only npm run test:phase3-browser
-          DB_USER=erp_app DB_PASSWORD=synthetic-ci-app-only FIXTURE_DB_USER=erp_migrator FIXTURE_DB_PASSWORD=synthetic-ci-owner-only npm run test:phase4-browser
+          BROWSER_ARTIFACT_ROOT="$RUNNER_TEMP/hardware-erp-browser-evidence" DB_USER=erp_app DB_PASSWORD=synthetic-ci-app-only FIXTURE_DB_USER=erp_migrator FIXTURE_DB_PASSWORD=synthetic-ci-owner-only npm run test:browser-all
+      - name: Preserve sanitized first-failure browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/hardware-erp-browser-evidence/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Real database TLS and nginx SPA headers
+        env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
         run: |
           sudo apt-get update
           sudo apt-get install -y postgresql-16 nginx
@@ -109,9 +121,8 @@ jobs:
         run: |
           docker build --target backend -t hardware-erp-api:${{ github.sha }} .
           docker build --target web -t hardware-erp-web:${{ github.sha }} .
-  release-blockers:
-    name: Production release remains blocked
-    needs: local-gates
+  financial-invariants:
+    name: Original financial invariants (engineering)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -141,7 +152,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version-file: .nvmrc}
       - name: Generate isolated session key
-        run: node -e "require('fs').appendFileSync(process.env.GITHUB_ENV, 'SESSION_SECRET=' + require('crypto').randomBytes(32).toString('hex') + '\\n')"
+        run: node -e "const key=require('crypto').randomBytes(32).toString('hex'); console.log('::add-mask::'+key); require('fs').appendFileSync(process.env.GITHUB_ENV, 'SESSION_SECRET='+key+'\\n')"
       - name: Install and migrate disposable database
         run: |
           npm install --global npm@11.17.0
@@ -155,6 +166,12 @@ jobs:
       - name: Original financial invariants (all required)
         env: {NODE_OPTIONS: '--require=${{ github.workspace }}/scripts/local-only-network.cjs'}
         run: npm run test:release-blockers --prefix backend
+  release-blockers:
+    name: Historical credentials (production release blocked)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
       - name: Historical credential release gate
         if: always()
         run: |

@@ -1,4 +1,5 @@
-import { test, before, after } from 'node:test';
+import { test, observe } from './helpers/browserEvidence.js';
+import { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
@@ -63,6 +64,7 @@ after(async () => {
 
 async function login(t, role = 'admin') {
   const context = await browser.newContext({ serviceWorkers: 'block' });
+  const evidence = await observe(t, context, { fixtures, secrets: [password] });
   const blockedOrigins = new Set();
   await context.routeWebSocket('**/*', socket => {
     blockedOrigins.add('websocket');
@@ -88,8 +90,7 @@ async function login(t, role = 'admin') {
     guardedRequests.add(pending);
     return pending.finally(() => guardedRequests.delete(pending));
   });
-  t.after(() => assert.equal(blockedOrigins.size, 0, 'The built frontend must never request a nonlocal origin'));
-  t.after(async () => { while (guardedRequests.size) await Promise.all([...guardedRequests]); await context.close(); });
+  t.after(async () => { await evidence.finish(async () => { while (guardedRequests.size) await Promise.all([...guardedRequests]); assert.equal(blockedOrigins.size, 0, 'The built frontend must never request a nonlocal origin'); }); });
   const page = await context.newPage();
   page.setDefaultTimeout(10000);
   page.on('pageerror', error => console.error('Browser runtime error:', error.message));

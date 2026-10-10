@@ -1,4 +1,5 @@
-import { test, before, after } from 'node:test';
+import { test, observe } from './helpers/browserEvidence.js';
+import { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomUUID, randomInt } from 'node:crypto';
@@ -46,6 +47,7 @@ async function loginPage(page,identity=email){
 async function session(t){
  const context=await browser.newContext({serviceWorkers:'block',extraHTTPHeaders:{'X-Forwarded-For':`127.0.0.${++sessionNumber}`}});const attempted=new Set();
  const control={drop:null,requests:[],quoteGate:null,quoteReached:null,releaseQuote:null,paymentGate:null,paymentReached:null,releasePayment:null};
+ const evidence = await observe(t, context, { fixtures, control, secrets: [password] });
  await context.routeWebSocket('**/*',socket=>{attempted.add('websocket');socket.close();});
  const guardedRequests=new Set();
  await context.route('**/*',route=>{const pending=(async()=>{
@@ -63,9 +65,10 @@ async function session(t){
   return route.fulfill({response});
  })();guardedRequests.add(pending);return pending.finally(()=>guardedRequests.delete(pending));
  });
- t.after(()=>assert.equal(attempted.size,0,'No nonlocal browser request or WebSocket may be attempted'));t.after(async()=>{control.releaseQuote?.();control.releasePayment?.();while(guardedRequests.size)await Promise.all([...guardedRequests]);await context.close();});
+ const runtime=[];
+ t.after(async () => { await evidence.finish(async () => {control.releaseQuote?.();control.releasePayment?.();while(guardedRequests.size)await Promise.all([...guardedRequests]);assert.equal(attempted.size,0,'No nonlocal browser request or WebSocket may be attempted');assert.deepEqual(runtime,[]);}); });
  const page=await context.newPage();page.setDefaultTimeout(12000);
- const runtime=[];page.on('pageerror',error=>runtime.push(error.message));t.after(()=>assert.deepEqual(runtime,[]));
+ page.on('pageerror',error=>runtime.push(error.message));
  await loginPage(page);return {context,page,control};
 }
 async function addProduct(page,fixture,quick=false){

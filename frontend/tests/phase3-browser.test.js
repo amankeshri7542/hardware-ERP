@@ -1,4 +1,5 @@
-import { test, before, after } from 'node:test';
+import { test, observe } from './helpers/browserEvidence.js';
+import { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomUUID, randomInt } from 'node:crypto';
@@ -82,6 +83,7 @@ async function session(t) {
   const attempted = new Set();
   const context = await browser.newContext({ serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': `127.0.0.${++sessionNumber}` } });
   const control = { drop: null, requests: [], catalogRequests: [] };
+ const evidence = await observe(t, context, { fixtures, control, secrets: [password] });
   await context.routeWebSocket('**/*', socket => { attempted.add('websocket'); socket.close(); });
   const guardedRequests = new Set();
   await context.route('**/*', route => {
@@ -107,13 +109,11 @@ async function session(t) {
     guardedRequests.add(pending);
     return pending.finally(() => guardedRequests.delete(pending));
   });
-  t.after(() => assert.equal(attempted.size, 0, 'No external browser request or WebSocket may be attempted'));
-  t.after(async () => { while (guardedRequests.size) await Promise.all([...guardedRequests]); await context.close(); });
+  const runtimeErrors = [];
+  t.after(async () => { await evidence.finish(async () => { while (guardedRequests.size) await Promise.all([...guardedRequests]); assert.equal(attempted.size, 0, 'No external browser request or WebSocket may be attempted'); assert.deepEqual(runtimeErrors, []); }); });
   const page = await context.newPage();
   page.setDefaultTimeout(12000);
-  const runtimeErrors = [];
   page.on('pageerror', error => runtimeErrors.push(error.message));
-  t.after(() => assert.deepEqual(runtimeErrors, []));
   await login(page);
   return { page, context, control };
 }
@@ -436,7 +436,6 @@ test('Phase3 browser product metadata and conversion edits preserve intervening 
   try { await page.getByRole('button', { name: 'Save product', exact: true }).click(); } catch (error) {
     t.diagnostic(JSON.stringify({ catalogRequests: control.catalogRequests, body: await page.locator('body').innerText(),
       buttons: await page.locator('button').evaluateAll(nodes => nodes.map(node => ({text:node.textContent,html:node.outerHTML,parents:[...function*(item){while(item){yield `${item.tagName}:${item.getAttribute('aria-hidden')}`;item=item.parentElement;}}(node)]}))) }));
-    await page.screenshot({ path: '/private/tmp/phase4-baseline-metadata-timeout.png', fullPage: true });
     throw error;
   }
   await expect(page.getByRole('dialog', { name: 'Edit Product', exact: true })).toBeHidden();

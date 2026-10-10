@@ -12,3 +12,10 @@ Use only the disposable synthetic shop. All settlement screens are admin-only. A
 If a response is lost, reload or reauthenticate and use **Recover** for the saved operation. The browser retains the original actor, operation, exact payload, source/target identifiers and key before dispatch. Account switching must not create a new operation for the unresolved intent. Return to the original actor/document when indicated. A later rejection does not prove an earlier uncertain attempt failed. Do not clear browser storage, fabricate a replacement receipt or retry with a fresh key to resolve uncertainty.
 
 Database recovery is forward-only: preserve original source, immutable application/refund/debit/cash/ledger rows and successful idempotency results. Use read-only `db/reconciliation/phase-4.sql`, compare the exact failing key/actor with saved results, and investigate inconsistent evidence. Do not rewrite issued snapshots, rebalance caches or roll back to older code that ignores settlement/period rules. Live backups, restoration and accountant acceptance remain separate mandatory gates.
+
+
+## Current stabilization hold
+
+Checkpoint5A remains blocked despite the complete native61/61 browser run. The older two recovery timeouts and separate historical PostgreSQL concurrency uncertainty have not been causally resolved; required Linux final-source execution is missing. New controlled schedules and sanitized first-failure capture improve evidence, not acceptance. Preserve original intent/key/actor and database effects; a rejected later retry never proves an earlier uncertain attempt absent. Do not clear browser storage or re-enter a fresh financial operation as a document recovery action.
+
+PDFs and attachments remain disabled; safe document delivery is only a design pending5A. No printing, provider verification or production operation is authorized. Follow `PHASE-4-STABILIZATION-REPORT.md` and `RELEASE-BLOCKERS.md`, not older commit/push permission. Current work must remain unstaged/uncommitted.
