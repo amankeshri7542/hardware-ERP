@@ -36,6 +36,9 @@ test('Phase4 dashboard overdue receivables remain positive when the same custome
 });
 
 test('Phase4 dashboard defaults use the shop-local day across a UTC date boundary',async t=>{
+  const customer=await fixtureCustomer();
+  const receipt=await post('/payments',{customer_id:customer.id,amount:'1.00',mode:'cash',payment_date:'2026-10-08'});
+  assert.equal(receipt.status,201,JSON.stringify(receipt.body));
   t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-10-08T20:00:00.000Z')});
   try {
     const result=await get('payment-modes');assert.equal(result.status,200,JSON.stringify(result.body));assert.ok(result.body.data.length>0,'The boundary assertion must inspect actual tender rows');

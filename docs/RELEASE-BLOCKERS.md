@@ -1,5 +1,12 @@
 # Release blockers
 
+## Latest verification checkpoint — fixed-date fixture repair
+
+Latest full native matrix: **FAIL**, solely the preserved UNKNOWN non-JSON payment response (263 backend passed, 1 failed; 23 document backend tests not reached). The owned date-boundary fixture PASSED. Original 11 invariants, 101 frontend unit/auth, all 68 browsers, 10 renderer/runtime tests, 7 actual output fixtures, lint/syntax/build, isolation/evidence controls and TLS/nginx PASSED. Earlier complete 287-backend PASS remains historical evidence, not the latest aggregate. Tested tree `dd8c8633cff496cbe93ddb9de0d3efabebf00475`, executable manifest `d5d2755657caad479e715a136985c8297c7bfdfffd08818ca0f178ead0b145b6`.
+
+Linux run 38108179822 at `e6bb7170fb31b62ddd20dc6b1b2c50973b1c4c77`: original invariants PASS; engineering FAIL on the diagnosed fixed-date fixture, before browser execution. Its actual Docker renderer/storage tests passed. The next reviewed checkpoint contains only that fixture repair and documentation. Exact follow-up Linux result is recorded below when available. Historical credential/incident, live infrastructure, backup/restore, physical printer, accountant/operator gates remain unresolved. Production **BLOCKED**. Stop after 5B; no attachments or cashier rollout.
+
+
 ## Final native follow-up — 2026-10-11
 
 The complete native matrix after the last executable change PASSED: 287 backend, 11 original financial invariants, 101 frontend unit/auth, 68 browsers (61 inherited plus 7 document), 10 renderer/runtime tests and 7 actual PDF output fixtures. Lint, syntax, build, cash-fixture isolation, failure-artifact controls, TLS and nginx checks all exited 0. Exact commands, exit statuses and logs: `/private/tmp/hardware-phase5b-start-_lnw10p3/final-verification.json`.

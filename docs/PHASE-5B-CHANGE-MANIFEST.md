@@ -83,3 +83,79 @@ A	scripts/test-document-runtime.cjs
 ```
 
 Later documentation-only additions: PHASE-5B-TEST-EVIDENCE.md and this manifest; updated measured outcomes in PHASE-5B-REPORT, INCIDENT-REGISTER and RELEASE-BLOCKERS. Recompute temporary-index source manifest and complete candidate scan before each reviewed publication.
+
+## Final executable follow-up
+
+Starting complete tree remains `9bc576c4fc784ea57642496bd170abc559982808`. Reviewed delivery `e1ead278a760c999f6559ac3715e79cf61e7e4d5` has tree `26e57c9acb842ce13ce7c95030259a49afb60b70`. Browser test repairs were published as `e6bb7170fb31b62ddd20dc6b1b2c50973b1c4c77`, tree `ecf346b10cd7382b948af4edbbf477750139bf41`; local and origin were verified equal.
+
+Latest executable candidate is tree `dd8c8633cff496cbe93ddb9de0d3efabebf00475`, manifest SHA256 `d5d2755657caad479e715a136985c8297c7bfdfffd08818ca0f178ead0b145b6`. The only additional executable change is an owned, fixed-date receipt fixture in `backend/tests/phase4/dashboard.test.js`. Subsequent files are documentation only. All snapshots include untracked source through temporary indices; applied migrations 022/023 were unchanged by these follow-ups. Publication evidence records the final commit/tree without self-referential hashes.
+
+Complete task file comparison against the preserved starting candidate:
+
+```text
+M	.github/workflows/phase-1.yml
+M	CLAUDE.md
+A	backend/document-worker.js
+M	backend/package.json
+M	backend/src/app.js
+M	backend/src/middleware/authorize.js
+A	backend/src/modules/documents/artifacts.js
+A	backend/src/modules/documents/config.js
+A	backend/src/modules/documents/documentDto.js
+A	backend/src/modules/documents/documents.router.js
+A	backend/src/modules/documents/documents.service.js
+A	backend/src/modules/documents/jobs.js
+A	backend/src/modules/documents/renderProcess.js
+M	backend/src/utils/idempotency.js
+M	backend/tests/environment/migrations.test.js
+M	backend/tests/helpers/disposableDatabase.js
+M	backend/tests/helpers/financial.js
+M	backend/tests/phase4/dashboard.test.js
+M	backend/tests/phase4/reporting.test.js
+A	backend/tests/phase5b/documents.test.js
+A	backend/tests/phase5b/lifecycle.test.js
+A	backend/tests/phase5b/worker-death.test.js
+A	db/document-worker-grants.sql
+M	db/grants.sql
+A	db/migrations/022_document_delivery.sql
+A	db/migrations/023_document_function_search_path.sql
+M	docs/DOCUMENT-DELIVERY-CONTRACT.md
+M	docs/DOCUMENT-RENDERER-DECISION.md
+A	docs/INCIDENT-REGISTER.md
+M	docs/LOCAL-DEVELOPMENT.md
+M	docs/PHASE-5-HANDOFF.md
+A	docs/PHASE-5B-CHANGE-MANIFEST.md
+A	docs/PHASE-5B-PLAN.md
+A	docs/PHASE-5B-REPORT.md
+A	docs/PHASE-5B-TEST-EVIDENCE.md
+A	docs/PHASE-5C-HANDOFF.md
+M	docs/RELEASE-BLOCKERS.md
+M	docs/SECURITY-RUNBOOK.md
+M	frontend/package.json
+A	frontend/src/api/documents.api.js
+M	frontend/src/components/AppLayout.jsx
+A	frontend/src/components/Documents/DocumentsPanel.jsx
+A	frontend/src/components/Documents/documentIntent.js
+M	frontend/src/pages/Customers/CustomerDetailPage.jsx
+M	frontend/src/pages/Invoices/InvoiceDetailPage.jsx
+M	frontend/src/pages/Payments/PaymentsPage.jsx
+M	frontend/tests/helpers/browserEvidence.js
+M	frontend/tests/phase4-browser.test.js
+A	frontend/tests/phase5b-browser.test.js
+A	frontend/tests/phase5b.test.js
+A	renderer/DEPENDENCY-LICENSES.json
+A	renderer/Dockerfile
+A	renderer/README.md
+A	renderer/cli.cjs
+A	renderer/fonts/NotoSansDevanagari.ttf
+A	renderer/fonts/OFL.txt
+A	renderer/fonts/README.md
+A	renderer/isolation-probe.cjs
+A	renderer/package-lock.json
+A	renderer/package.json
+A	renderer/render.cjs
+A	renderer/tests/fixture.cjs
+A	renderer/tests/render.test.cjs
+A	scripts/test-document-runtime-output.py
+A	scripts/test-document-runtime.cjs
+```

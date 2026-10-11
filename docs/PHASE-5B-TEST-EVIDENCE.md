@@ -1,5 +1,12 @@
 # Phase5B measured evidence — 2026-10-10
 
+## Latest verification checkpoint — fixed-date fixture repair
+
+Latest full native matrix: **FAIL**, solely the preserved UNKNOWN non-JSON payment response (263 backend passed, 1 failed; 23 document backend tests not reached). The owned date-boundary fixture PASSED. Original 11 invariants, 101 frontend unit/auth, all 68 browsers, 10 renderer/runtime tests, 7 actual output fixtures, lint/syntax/build, isolation/evidence controls and TLS/nginx PASSED. Earlier complete 287-backend PASS remains historical evidence, not the latest aggregate. Tested tree `dd8c8633cff496cbe93ddb9de0d3efabebf00475`, executable manifest `d5d2755657caad479e715a136985c8297c7bfdfffd08818ca0f178ead0b145b6`.
+
+Linux run 38108179822 at `e6bb7170fb31b62ddd20dc6b1b2c50973b1c4c77`: original invariants PASS; engineering FAIL on the diagnosed fixed-date fixture, before browser execution. Its actual Docker renderer/storage tests passed. The next reviewed checkpoint contains only that fixture repair and documentation. Exact follow-up Linux result is recorded below when available. Historical credential/incident, live infrastructure, backup/restore, physical printer, accountant/operator gates remain unresolved. Production **BLOCKED**. Stop after 5B; no attachments or cashier rollout.
+
+
 ## Final native follow-up — 2026-10-11
 
 The complete native matrix after the last executable change PASSED: 287 backend, 11 original financial invariants, 101 frontend unit/auth, 68 browsers (61 inherited plus 7 document), 10 renderer/runtime tests and 7 actual PDF output fixtures. Lint, syntax, build, cash-fixture isolation, failure-artifact controls, TLS and nginx checks all exited 0. Exact commands, exit statuses and logs: `/private/tmp/hardware-phase5b-start-_lnw10p3/final-verification.json`.
@@ -100,3 +107,15 @@ Skipped downstream steps: native TLS/nginx, PDF text/PNG verification, audit, cu
 Sanitized browser artifact11678605406 SHA256`5d6ad5fcf0651ffb78faad5a791e9436132243ace46a3279e7331569e22af529`; synthetic PDF artifact11677719841 SHA256`fa7ff88bcd62699125e86fc4d87eb8488e583bdc04e61dfcb18b8ff96d33a10d`. Collector verifies no raw traceZIP and no credential canary. Private logs retained; public record contains sanitized metadata only.
 
 Follow-up fixes are test-only: atomic popup-state reads and configured shop timezone; all4affected cases pass locally. Full verification source is `a045840759ce05a5bf6a3570294a662d50ad6314`, executable-manifest SHA256`01d9fbea48d5a782d9413972de3cb48bdb00b24fccfc19316042390c9e5801d6`. Evidence filename tested-linux-fixes-manifest.json. Prior source identities and failed outcomes above remain chronological evidence.
+
+## Linux fixed-date fixture failure — 2026-10-11
+
+Exact commit `e6bb7170fb31b62ddd20dc6b1b2c50973b1c4c77`, run 38108179822 attempt 1: independent original 11 invariants PASS; engineering FAIL in inherited backend tests (233/234). The dashboard shop-day boundary test expected real tender rows in October 1–9 but created none of its own. Its incidental current-date receipts were outside that fixed range on the fresh Linux database. The failed assertion was `The boundary assertion must inspect actual tender rows`, not an authentication or financial reconciliation failure. Native fixture-rich results had not exposed that dependency.
+
+Narrow repair creates a valid restricted-role payment dated October 8 before mocking the clock, retaining nonempty tender and exact shop-date assertions. No application code or financial policy changed. Full native rerun and exact-commit Linux follow-up are required. This diagnosis does not explain any older UNKNOWN response/concurrency incident. Original failure logs/artifacts are preserved under the `linux-fixes-` evidence prefix.
+
+## Latest native anomaly — fixed-date follow-up
+
+At tested tree `dd8c8633cff496cbe93ddb9de0d3efabebf00475` (executable manifest `d5d2755657caad479e715a136985c8297c7bfdfffd08818ca0f178ead0b145b6`), the repaired date-boundary test passed. The complete backend command instead failed an unrelated inherited test: `normalized numeric strings and object ordering replay; changed amount or reference conflicts`. Diagnostics recorded POST /payments, HTTP 400, no allowlisted headers, 48 non-JSON response bytes, complete response, SHA256 `7a1fabf227903297428f36da3b3547d91e308a992063271e8fe1a4f1e1e6cd26`, key `2e7082d7-f5c3-4c60-9542-ea60b7d9a5bc`, actor 142. Inherited financial tests: 233/234. Document backend tests were not reached by this fail-fast command.
+
+Attribution remains UNKNOWN. No speculative application change, old external API call or repeated green-until-pass rerun was used. The earlier complete native PASS is preserved under `before-fixed-date-fixture`; it is not the latest aggregate result. Owner disposition remains required.
