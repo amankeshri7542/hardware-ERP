@@ -82,7 +82,7 @@ const financialMutation = path => ['/api/payments', '/api/finance/customer/comma
 
 async function session(t) {
   const attempted = new Set();
-  const context = await browser.newContext({ serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': `127.0.0.${++sessionNumber}` } });
+  const context = await browser.newContext({ timezoneId: 'Asia/Kolkata', serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': `127.0.0.${++sessionNumber}` } });
   const control = { drop: null, requests: [], catalogRequests: [] };
  const evidence = await observe(t, context, { fixtures, control, secrets: [password] });
   await context.routeWebSocket('**/*', socket => { attempted.add('websocket'); socket.close(); });
@@ -182,15 +182,17 @@ async function select(page,label,text) {
     const option=popup.locator('.ant-select-item-option-content').filter({hasText:text});
     await expect(option).toHaveCount(1);await expect(option).toHaveText(text);
     const chosenText=(await option.innerText()).trim();
-    // Select through the combobox so scrolling a long form cannot occlude its portal popup.
+    // Wait for the visible active option after each key; virtual ARIA rows update separately.
     const count=await popup.locator('.ant-select-item-option-content').count();
+    const active=popup.locator('.ant-select-item-option-active .ant-select-item-option-content');
+    await expect(active).toHaveCount(1);
     let matched=false;
     for(let step=0;step<=count;step++) {
-      const active=await combobox.getAttribute('aria-activedescendant');
-      if(active && await page.locator(`[id=${JSON.stringify(active)}]`).getAttribute('aria-label')===chosenText){matched=true;break;}
+      const {labels,label}=await popup.evaluate(node=>({labels:[...node.querySelectorAll('.ant-select-item-option-content')].map(item=>item.textContent.trim()),label:node.querySelector('.ant-select-item-option-active .ant-select-item-option-content')?.textContent.trim()}));
+      if(label===chosenText){matched=true;break;}
+      const index=labels.indexOf(label);assert.ok(index>=0);
       await combobox.press('ArrowDown');
-      if(active) await expect(combobox).not.toHaveAttribute('aria-activedescendant',active);
-      else await expect(combobox).toHaveAttribute('aria-activedescendant',/.+/);
+      await expect(active).toHaveText(labels[(index+1)%labels.length]);
     }
     assert.ok(matched,'Keyboard active option must match the exact requested label');
     await combobox.press('Enter');

@@ -1,5 +1,12 @@
 # Phase5B measured evidence — 2026-10-10
 
+## Final native follow-up — 2026-10-11
+
+The complete native matrix after the last executable change PASSED: 287 backend, 11 original financial invariants, 101 frontend unit/auth, 68 browsers (61 inherited plus 7 document), 10 renderer/runtime tests and 7 actual PDF output fixtures. Lint, syntax, build, cash-fixture isolation, failure-artifact controls, TLS and nginx checks all exited 0. Exact commands, exit statuses and logs: `/private/tmp/hardware-phase5b-start-_lnw10p3/final-verification.json`.
+
+Tested tree: `a045840759ce05a5bf6a3570294a662d50ad6314`; executable manifest SHA256: `01d9fbea48d5a782d9413972de3cb48bdb00b24fccfc19316042390c9e5801d6`. Subsequent edits in this follow-up are documentation only. This result supersedes the earlier native aggregate status, not the preserved failed-run evidence or UNKNOWN incident disposition. The test-only Linux repairs atomically inspect dropdown state and use the configured Asia/Kolkata browser timezone. Candidate-specific Linux follow-up remains pending publication. Production remains BLOCKED.
+
+
 Evidence root `/private/tmp/hardware-phase5b-start-_lnw10p3`; raw logs/private synthetic credentials are not committed. Node24.21.0/npm11.17.0, macOS native PostgreSQL16 loopback, restricted application and dedicated document-worker roles. All Node application/test/build commands preload the local-only network guard; browsers block external navigation/redirects/sockets/service workers before navigation. Tooling retrieval is separate. No live dotenv.
 
 ## Source and baseline
@@ -77,3 +84,19 @@ Frozen executable tree eaaacbcd384faa54b34f994a1a71c3d944ce33f0; no executable c
 | RealDBTLS; nginxSPA/securityheaders |1+1 PASS |
 
 Raw exact commands, OS/runtime, durations/exit codes: final-verification.json and final-documents-independent.json. The native aggregate isFAIL, not rewritten toPASS by independent successes. Candidate-specific Linux proof follows the reviewed publication; until jobs complete its status isPENDING.
+
+## Published Phase5B Linux attempt1 — measured failure
+
+Commit `e1ead278a760c999f6559ac3715e79cf61e7e4d5`, tree `26e57c9acb842ce13ce7c95030259a49afb60b70`, run [38075648509](https://github.com/amankeshri7542/hardware-ERP/actions/runs/38075648509), attempt1.
+
+| Job | Result |
+|---|---|
+|114281937082 — original invariants |SUCCESS,11/11 |
+|114281937120 — local-gates |FAIL at inherited browser57/61; preceding287backend,101frontend,10Docker renderer/runtime and fixture controls passed |
+|114281937436 — historical credentials |FAIL,2findings |
+
+Skipped downstream steps: native TLS/nginx, PDF text/PNG verification, audit, current scanner, API/web image builds. New7documentbrowser suite was not reached because the inherited command failed. No claim of whole Linux acceptance.
+
+Sanitized browser artifact11678605406 SHA256`5d6ad5fcf0651ffb78faad5a791e9436132243ace46a3279e7331569e22af529`; synthetic PDF artifact11677719841 SHA256`fa7ff88bcd62699125e86fc4d87eb8488e583bdc04e61dfcb18b8ff96d33a10d`. Collector verifies no raw traceZIP and no credential canary. Private logs retained; public record contains sanitized metadata only.
+
+Follow-up fixes are test-only: atomic popup-state reads and configured shop timezone; all4affected cases pass locally. Full verification source is `a045840759ce05a5bf6a3570294a662d50ad6314`, executable-manifest SHA256`01d9fbea48d5a782d9413972de3cb48bdb00b24fccfc19316042390c9e5801d6`. Evidence filename tested-linux-fixes-manifest.json. Prior source identities and failed outcomes above remain chronological evidence.

@@ -1,5 +1,12 @@
 # Phase5C handoff — do not begin without a new task
 
+## Final native follow-up — 2026-10-11
+
+The complete native matrix after the last executable change PASSED: 287 backend, 11 original financial invariants, 101 frontend unit/auth, 68 browsers (61 inherited plus 7 document), 10 renderer/runtime tests and 7 actual PDF output fixtures. Lint, syntax, build, cash-fixture isolation, failure-artifact controls, TLS and nginx checks all exited 0. Exact commands, exit statuses and logs: `/private/tmp/hardware-phase5b-start-_lnw10p3/final-verification.json`.
+
+Tested tree: `a045840759ce05a5bf6a3570294a662d50ad6314`; executable manifest SHA256: `01d9fbea48d5a782d9413972de3cb48bdb00b24fccfc19316042390c9e5801d6`. Subsequent edits in this follow-up are documentation only. This result supersedes the earlier native aggregate status, not the preserved failed-run evidence or UNKNOWN incident disposition. The test-only Linux repairs atomically inspect dropdown state and use the configured Asia/Kolkata browser timezone. Candidate-specific Linux follow-up remains pending publication. Production remains BLOCKED.
+
+
 This delivery stops after actionable5A verification and synthetic Phase5B documents. Use PHASE-5B-REPORT, PHASE-5B-TEST-EVIDENCE, PHASE-5B-CHANGE-MANIFEST, DOCUMENT-DELIVERY-CONTRACT and INCIDENT-REGISTER together. Do not restart or discard prior financial/security/inventory work.
 
 Continue only from the actual isolated candidate/remote branch identities recorded by the final report. Inspect real worktree/index/untracked files before doing anything; preserve any later changes through a temporary-index snapshot. Original checkout's AI/mobile work is unrelated. No production operations, merge, history rewrite, credentials, external transfers or deployment were authorized by Phase5B.

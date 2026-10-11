@@ -1,5 +1,12 @@
 # Release blockers
 
+## Final native follow-up — 2026-10-11
+
+The complete native matrix after the last executable change PASSED: 287 backend, 11 original financial invariants, 101 frontend unit/auth, 68 browsers (61 inherited plus 7 document), 10 renderer/runtime tests and 7 actual PDF output fixtures. Lint, syntax, build, cash-fixture isolation, failure-artifact controls, TLS and nginx checks all exited 0. Exact commands, exit statuses and logs: `/private/tmp/hardware-phase5b-start-_lnw10p3/final-verification.json`.
+
+Tested tree: `a045840759ce05a5bf6a3570294a662d50ad6314`; executable manifest SHA256: `01d9fbea48d5a782d9413972de3cb48bdb00b24fccfc19316042390c9e5801d6`. Subsequent edits in this follow-up are documentation only. This result supersedes the earlier native aggregate status, not the preserved failed-run evidence or UNKNOWN incident disposition. The test-only Linux repairs atomically inspect dropdown state and use the configured Asia/Kolkata browser timezone. Candidate-specific Linux follow-up remains pending publication. Production remains BLOCKED.
+
+
 Updated for checkpoint5A stabilization on 2026-10-09. **Production release is BLOCKED.** Local settlement implementation and synthetic verification do not authorize deployment, historical repair or live credential actions. See `PHASE-4-REPORT.md`, `PHASE-4-TEST-EVIDENCE.md` and the preserved Phase 3 reports for scope, source identities and commands.
 
 ## Original financial invariants

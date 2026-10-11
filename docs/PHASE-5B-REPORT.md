@@ -1,5 +1,12 @@
 # Phase5B delivery report — 2026-10-10
 
+## Final native follow-up — 2026-10-11
+
+The complete native matrix after the last executable change PASSED: 287 backend, 11 original financial invariants, 101 frontend unit/auth, 68 browsers (61 inherited plus 7 document), 10 renderer/runtime tests and 7 actual PDF output fixtures. Lint, syntax, build, cash-fixture isolation, failure-artifact controls, TLS and nginx checks all exited 0. Exact commands, exit statuses and logs: `/private/tmp/hardware-phase5b-start-_lnw10p3/final-verification.json`.
+
+Tested tree: `a045840759ce05a5bf6a3570294a662d50ad6314`; executable manifest SHA256: `01d9fbea48d5a782d9413972de3cb48bdb00b24fccfc19316042390c9e5801d6`. Subsequent edits in this follow-up are documentation only. This result supersedes the earlier native aggregate status, not the preserved failed-run evidence or UNKNOWN incident disposition. The test-only Linux repairs atomically inspect dropdown state and use the configured Asia/Kolkata browser timezone. Candidate-specific Linux follow-up remains pending publication. Production remains BLOCKED.
+
+
 Current scope: safe synthetic document delivery plus actionable5A Linux verification. Production release remains BLOCKED. The user changed development sequencing and explicitly authorized reviewed checkpoint commits/normal pushes only to origin/codex/phase-1-security-baseline; no merge, deployment, production activation or Phase5C implementation.
 
 ## Preserved candidate
@@ -41,3 +48,7 @@ D. Supplierattachments, otherdocumenttypes, cashier rollout and Phase5C: **DEFER
 E. Historicalcredentials, realinfrastructure/APIwebCompose runtime, backuprestore, physicalprinter/accountant/operator acceptance: **PENDING/BLOCKED**.
 
 F. Overallproductionrelease: **BLOCKED**. Reviewed branch publication is for verification only.
+
+## Exact first Phase5B Linux result
+
+Run38075648509 at e1ead278a760c999f6559ac3715e79cf61e7e4d5 passed287backend,11originalinvariants,101frontend and10actual isolated Docker renderer/storage tests. Engineering job failed4inheritedbrowser cases (57/61);7newdocumentbrowser cases and later verification steps were not reached. Artifacts were downloaded and checked. Test-only state-read/timezone fixes have4/4affected native passes; final full follow-up is recorded in the evidence file. This Linux result does not erase the distinct native unknowns or historical disclosures.
